@@ -5,7 +5,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"github.com/Pragma-innovation/druid-drivers/pstn-cdr/global"
+	"github.com/Pragma-innovation/ingest-voice-net/global"
 	"github.com/Pragma-innovation/libphonego/gophonenumber"
 	"github.com/Shopify/sarama"
 	"github.com/Sirupsen/logrus"

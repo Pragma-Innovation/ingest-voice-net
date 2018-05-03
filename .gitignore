@@ -4,6 +4,12 @@
 *.so
 *.dylib
 
+# Folders
+_obj
+_test
+__pycache__
+.idea
+
 # Test binary, build with `go test -c`
 *.test
 
