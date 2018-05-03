@@ -1,0 +1,105 @@
+{
+  "type" : "index_hadoop",
+  "spec" : {
+    "ioConfig" : {
+      "type" : "hadoop",
+      "inputSpec" : {
+        "type" : "static",
+        "paths" : "cdr-folder/my-cdr-2016.json"
+      }
+    },
+    "dataSchema" : {
+      "dataSource" : "pstn_cdr",
+      "granularitySpec" : {
+        "type" : "uniform",
+        "segmentGranularity" : "day",
+        "queryGranularity" : "minute",
+        "intervals" : ["2016-09-25/2016-10-04"]
+      },
+      "parser" : {
+        "type" : "hadoopyString",
+        "parseSpec" : {
+          "format" : "json",
+          "dimensionsSpec" : {
+            "dimensions" : [
+              "account",
+              "direction",
+              "time",
+              "switch_ip",
+              "call_type",
+              "numb_plan",
+              "calling_cat",
+              "nat_call_num",
+              "calling_num",
+              "nat_add_part",
+              "add_call_pat_ad",
+              "type_called_num",
+              "num_plan_called",
+              "called_num",
+              "cat_real_num",
+              "typ_real_num",
+              "nat_real_called",
+              "real_called",
+              "billing_mode",
+              "service_code",
+              "release_loc",
+              "operator_id",
+              "circuit_id",
+              "in_trunk_group",
+              "out_trunk_group"
+            ]
+          },
+          "timestampSpec" : {
+            "format" : "auto",
+            "column" : "time"
+          }
+        }
+      },
+      "metricsSpec" : [
+        {
+          "name" : "count",
+          "type" : "count"
+        },
+        {
+          "name" : "connect_duration",
+          "type" : "longSum",
+          "fieldName" : "connect_duration"
+        },
+        {
+          "name" : "connect_ringing",
+          "type" : "longSum",
+          "fieldName" : "connect_ringing"
+        },
+        {
+          "name" : "total_duration",
+          "type" : "longSum",
+          "fieldName" : "total_duration"
+        },
+        {
+          "name" : "max_duration",
+          "type" : "longMax",
+          "fieldName" : "total_duration"
+        },
+        {
+          "name" : "min_duration",
+          "type" : "longMin",
+          "fieldName" : "total_duration"
+        },
+        {
+          "type" : "hyperUnique",
+          "name" : "called_num_card",
+          "fieldName" : "called_num",
+          "isInputHyperUnique" : false
+        }
+      ]
+    },
+    "tuningConfig" : {
+      "type" : "hadoop",
+      "partitionsSpec" : {
+        "type" : "hashed",
+        "targetPartitionSize" : 5000000
+      },
+      "jobProperties" : {}
+    }
+  }
+}

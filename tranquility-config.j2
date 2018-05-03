@@ -1,0 +1,150 @@
+{
+  "dataSources": [
+    {
+      "spec": {
+        "dataSchema": {
+          "dataSource": "pstn_cdr",
+          "parser": {
+            "type": "string",
+            "parseSpec": {
+              "timestampSpec": {
+                "format" : "auto",
+                "column" : "ingest_time"
+              },
+              "dimensionsSpec": {
+                "dimensions": [
+                  "app_flag",
+                  "account",
+                  "direction",
+                  "ingest_time",
+                  "call_start_date",
+                  "call_start_hour",
+                  "call_start_minsec",
+                  "switch_ip",
+                  "access_code",
+                  "type_calling_party_access",
+                  "numbering_plan_calling_party_number",
+                  "calling_party_category",
+                  "nature_calling_number",
+                  "calling_number",
+                  "nature_additional_calling_party_address",
+                  "additional_calling_party_address",
+                  "access_type_called_number",
+                  "number_plan_called_party",
+                  "nature_called_number",
+                  "called_num",
+                  "category_real_called_number",
+                  "type_real_called_number",
+                  "nat_real_called",
+                  "real_called_number",
+                  "billing_mode",
+                  "service_code",
+                  "release_loc_cause",
+                  "operator_id",
+                  "circuit_id",
+                  "in_trunk_group",
+                  "out_trunk_group",
+                  "called_country_code",
+                  "called_country",
+                  "called_number_type",
+                  "called_number_location",
+                  "rtp_addi_info",
+                  "rtp_ip",
+                  "rtp_port"
+                ]
+              },
+              "format": "json"
+            }
+          },
+          "granularitySpec": {
+            "type": "uniform",
+            "segmentGranularity": "hour",
+            "queryGranularity": "minute"
+          },
+          "metricsSpec": [
+            {
+              "name" : "count",
+              "type" : "count"
+            },
+            {
+              "name" : "connection_duration",
+              "type" : "longSum",
+              "fieldName" : "connection_duration"
+            },
+            {
+              "name" : "connnection_ringing_duration",
+              "type" : "longSum",
+              "fieldName" : "connnection_ringing_duration"
+            },
+            {
+              "name" : "total_duration",
+              "type" : "longSum",
+              "fieldName" : "total_duration"
+            },
+            {
+              "name" : "rtp_duration",
+              "type" : "longSum",
+              "fieldName" : "rtp_duration"
+            },
+            {
+              "name" : "rtp_bytes_sent",
+              "type" : "longSum",
+              "fieldName" : "rtp_bytes_sent"
+            },
+            {
+              "name" : "rtp_bytes_received",
+              "type" : "longSum",
+              "fieldName" : "rtp_bytes_received"
+            },
+            {
+              "name" : "rtp_pck_sent",
+              "type" : "longSum",
+              "fieldName" : "rtp_pck_sent"
+            },
+            {
+              "name" : "rtp_pck_received",
+              "type" : "longSum",
+              "fieldName" : "rtp_pck_received"
+            },
+            {
+              "name" : "rtp_pck_lost",
+              "type" : "longSum",
+              "fieldName" : "rtp_pck_lost"
+            },
+            {
+              "name" : "rtp_avg_jitter",
+              "type" : "longSum",
+              "fieldName" : "rtp_avg_jitter"
+            },
+            {
+              "name" : "rtp_avg_trans_delay",
+              "type" : "longSum",
+              "fieldName" : "rtp_avg_trans_delay"
+            }
+          ]
+        },
+        "tuningConfig": {
+          "maxRowsInMemory": "100000",
+          "type": "realtime",
+          "windowPeriod": "PT10M",
+          "intermediatePersistPeriod": "PT10M"
+        }
+      },
+      "properties": {
+        "topicPattern.priority": "1",
+        "topicPattern": "voipcdr"
+      }
+    }
+  ],
+  "properties": {
+    "zookeeper.connect": "localhost:2181",
+    "zookeeper.timeout": "PT20S",
+    "druid.selectors.indexing.serviceName": "druid/overlord",
+    "druid.discovery.curator.path": "/druid/discovery",
+    "kafka.zookeeper.connect": "localhost:2181",
+    "kafka.group.id": "tranquility-kafka",
+    "consumer.numThreads": "2",
+    "commit.periodMillis": "15000",
+    "reportDropsAsExceptions": "false"
+  }
+}
