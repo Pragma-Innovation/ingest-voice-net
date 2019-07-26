@@ -20,6 +20,19 @@ func init() {
 	Logger.Level = logrus.DebugLevel
 }
 
+func SetLogLevel(myLevel string) {
+	var err error
+	Logger.Level, err = logrus.ParseLevel(myLevel)
+	if err != nil {
+		Logger.WithFields(logrus.Fields{
+			"log level": myLevel,
+			"error": err,
+		}).Fatal("unable to set log level")
+		return
+	}
+	return
+}
+
 // Function to convert unix time to druid timestamp for batch interval
 
 func FromUnixTimeToDruid(myUnixTime time.Time) string {

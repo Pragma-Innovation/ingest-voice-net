@@ -9,8 +9,8 @@ import (
 	"github.com/Pragma-Innovation/ingest-voice-net/cdr-tools"
 	"github.com/Pragma-Innovation/ingest-voice-net/global"
 	"github.com/Shopify/sarama"
-	"github.com/sirupsen/logrus"
 	"github.com/flosch/pongo2"
+	"github.com/sirupsen/logrus"
 	"io"
 	"io/ioutil"
 	"math"
@@ -67,6 +67,7 @@ var (
 	userKafkaVerifySsl     = flag.Bool("verify", false, "OPTIONAL STREAM KAFKA SSL Authentication: Verify ssl certificates chain")
 	userKafkaCertFile      = flag.String("certificate", "", "OPTIONAL STREAM KAFKA SSL Authentication: Certificate file for client authentication")
 	userMicroBLoopTimeOut  = flag.String("batch-loop", "", "MANDATORY MICRO BATCH: Loop time out for micro batch in s or ms: 120s")
+	userLogLevel           = flag.String("log", "", "optional - log level can be: trace debug info warn error fatal panic")
 )
 
 // End of flag declaration
@@ -88,6 +89,10 @@ func main() {
 	if flag.NFlag() < 1 || len(*userMode) == 0 {
 		flag.PrintDefaults()
 		os.Exit(0)
+	}
+	if len(*userLogLevel) != 0 {
+		global.SetLogLevel(*userLogLevel)
+		global.Logger.WithField("level", *userLogLevel).Warn("log level has been modified to this value")
 	}
 	switch *userMode {
 	case "batch":
@@ -513,7 +518,8 @@ func batchStreamMainFunc(myDirInput string, myMicroBLoopTimeOut string,
 	doneCh := make(chan bool, 1)
 	// launch go routing to capture signal interrupt
 	go func() {
-		for _ = range cdrProducerSignals {
+		for mySig := range cdrProducerSignals {
+			global.Logger.WithField("signal", mySig).Warn("signal received")
 			doneCh <- true
 		}
 	}()

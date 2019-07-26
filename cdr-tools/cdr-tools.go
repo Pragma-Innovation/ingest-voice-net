@@ -6,7 +6,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"github.com/Pragma-Innovation/ingest-voice-net/global"
-	"github.com/Pragma-Innovation/libphonego/gophonenumber"
 	"github.com/Shopify/sarama"
 	"github.com/sirupsen/logrus"
 	"os"
@@ -822,7 +821,7 @@ func (myCdr *CirCdr) EnrichWibLibPhone() error {
 	default:
 		// removing too buggy called number before calling the libphonenumber
 		if !strings.Contains(myRealCalled, "+0") {
-			myCdr.LibPhoneEnrich = phonego.GoPgmPtsnColumnFromCalledNum(myRealCalled)
+			myCdr.LibPhoneEnrich = PstnColumnFromCalledNum(myRealCalled)
 		}
 	}
 	return nil
