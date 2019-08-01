@@ -2,10 +2,12 @@ package main
 
 import (
 	"flag"
-	"io/ioutil"
-	"os"
 	"fmt"
 	"github.com/Pragma-Innovation/ingest-voice-net/global"
+	"github.com/sirupsen/logrus"
+	"io/ioutil"
+	"os"
+	"path/filepath"
 )
 
 
@@ -16,12 +18,12 @@ type SegmentData struct {
 
 type DataModel struct {
 	Model string
-	druidFiles []*SegmentData
+	DruidFiles []*SegmentData
 }
 
 type DataModels []*DataModel
 
-func inspectDruidSegmentCache(segmentLocation string, dataModels DataModels) error {
+func inspectDruidSegmentCache(segmentLocation string, dataModels *DataModels) error {
 	allFilesPath, err := ioutil.ReadDir(segmentLocation)
 	if err != nil {
 		global.Logger.WithError(err).Fatal("Unable to read druid segment cache folder")
@@ -35,8 +37,28 @@ func inspectDruidSegmentCache(segmentLocation string, dataModels DataModels) err
 			currentModel := &DataModel {
 				Model: filePath.Name(),
 			}
-			dataModels = append(dataModels, currentModel)
-			fmt.Printf("adding model: %s\n", currentModel.Model)
+			*dataModels = append(*dataModels, currentModel)
+		}
+	}
+	for _, model := range *dataModels {
+		modelPath := segmentLocation + "/" + model.Model
+		err := filepath.Walk(modelPath, func(path string, info os.FileInfo, err error) error {
+			if filepath.Ext(path) == ".bin" {
+				druidFile := &SegmentData{
+					DruidFile: path,
+					Converted: false,
+				}
+				model.DruidFiles = append(model.DruidFiles, druidFile)
+				return nil
+			} else {
+				return nil
+			}
+		})
+		if err != nil {
+			global.Logger.WithFields(logrus.Fields{
+				"error": err,
+				"model": model.Model,
+			}).Fatal("Unable to read druid segment")
 		}
 	}
 	return nil
@@ -64,11 +86,14 @@ func main() {
 		global.Logger.WithField("level", *logLevel).Warn("log level has been modified to this value")
 	}
 	var myModels DataModels
-	err := inspectDruidSegmentCache(*druidSegmentFolder, myModels)
+	err := inspectDruidSegmentCache(*druidSegmentFolder, &myModels)
 	if err != nil {
 		global.Logger.WithError(err).Fatal("unable to inspect druid segment cache folder")
 	}
 	for _, model := range myModels {
 		fmt.Printf("model: %s\n", model.Model)
+		for _, segment := range model.DruidFiles {
+			fmt.Printf("\tsegment: %s\n", segment.DruidFile)
+		}
 	}
 }
