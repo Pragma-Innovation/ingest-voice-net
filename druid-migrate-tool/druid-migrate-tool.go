@@ -21,7 +21,7 @@ type DataModel struct {
 
 type DataModels []*DataModel
 
-func inspectDruidSegmentCache(segmentLocation string, dataModel DataModels) error {
+func inspectDruidSegmentCache(segmentLocation string, dataModels DataModels) error {
 	allFilesPath, err := ioutil.ReadDir(segmentLocation)
 	if err != nil {
 		global.Logger.WithError(err).Fatal("Unable to read druid segment cache folder")
@@ -31,7 +31,12 @@ func inspectDruidSegmentCache(segmentLocation string, dataModel DataModels) erro
 		return fmt.Errorf("cannot deal with emtry druid folder")
 	}
 	for _, filePath := range allFilesPath {
-		fmt.Printf("path: %s\n", filePath.Name())
+		if filePath.Name() != ".DS_Store" {
+			currentModel := &DataModel {
+				Model: filePath.Name(),
+			}
+			dataModels = append(dataModels, currentModel)
+		}
 	}
 	return nil
 }
@@ -61,5 +66,8 @@ func main() {
 	err := inspectDruidSegmentCache(*druidSegmentFolder, myModels)
 	if err != nil {
 		global.Logger.WithError(err).Fatal("unable to inspect druid segment cache folder")
+	}
+	for _, model := range myModels {
+		fmt.Printf("model: %s\n", model.Model)
 	}
 }
