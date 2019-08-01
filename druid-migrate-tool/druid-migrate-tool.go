@@ -36,6 +36,7 @@ func inspectDruidSegmentCache(segmentLocation string, dataModels DataModels) err
 				Model: filePath.Name(),
 			}
 			dataModels = append(dataModels, currentModel)
+			fmt.Printf("adding model: %s\n", currentModel.Model)
 		}
 	}
 	return nil
