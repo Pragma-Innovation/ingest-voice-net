@@ -64,8 +64,8 @@ func inspectDruidSegmentCache(segmentLocation string, dataModels *DataModels) er
 }
 
 func printStatsOfSegmentsInspection(dataModels DataModels) {
-	fmt.Printf("<========================= Begining of inspection result =============================>")
-	fmt.Printf("Found %d models in druid segment cache\n", len(dataModels))
+	fmt.Printf("\n\n<========================= Begining of inspection result =============================>\n\n")
+	fmt.Printf("Found %d models in druid segment cache\n\n", len(dataModels))
 	for _, model := range dataModels {
 		fmt.Printf("\n\nmodel: %s have %d segments\n", model.Model, len(model.DruidFiles))
 		fmt.Printf("\tTop 10 segments:\n")
@@ -80,7 +80,7 @@ func printStatsOfSegmentsInspection(dataModels DataModels) {
 			}
 		}
 	}
-	fmt.Printf("<========================= End of inspection result      =============================>")
+	fmt.Printf("\n\n<========================= End of inspection result      =============================>\n\n")
 }
 
 func main() {
