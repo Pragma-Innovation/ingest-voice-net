@@ -67,14 +67,14 @@ func printStatsOfSegmentsInspection(dataModels DataModels) {
 	fmt.Printf("<========================= Begining of inspection result =============================>")
 	fmt.Printf("Found %d models in druid segment cache\n", len(dataModels))
 	for _, model := range dataModels {
-		fmt.Printf("model: %s have %d segments\n", model.Model, len(model.DruidFiles))
-		fmt.Printf("Top 10 segments:\n")
+		fmt.Printf("\n\nmodel: %s have %d segments\n", model.Model, len(model.DruidFiles))
+		fmt.Printf("\tTop 10 segments:\n")
 		for i := 0; i < len(model.DruidFiles) && i < 10; i++ {
 			fmt.Printf("\tsegment: %s\n", model.DruidFiles[i].DruidFile)
 		}
 		if len(model.DruidFiles) > 10 {
-			fmt.Printf("...\n...\n...\n")
-			fmt.Printf("Last 10 segments:\n")
+			fmt.Printf("\t...\n\t...\n\t...\n")
+			fmt.Printf("\tLast 10 segments:\n")
 			for i := len(model.DruidFiles) - 10; i < len(model.DruidFiles); i++ {
 				fmt.Printf("\tsegment: %s\n", model.DruidFiles[i].DruidFile)
 			}
