@@ -10,14 +10,13 @@ import (
 	"path/filepath"
 )
 
-
 type SegmentData struct {
 	DruidFile string
 	Converted bool
 }
 
 type DataModel struct {
-	Model string
+	Model      string
 	DruidFiles []*SegmentData
 }
 
@@ -34,7 +33,7 @@ func inspectDruidSegmentCache(segmentLocation string, dataModels *DataModels) er
 	}
 	for _, filePath := range allFilesPath {
 		if filePath.Name() != ".DS_Store" {
-			currentModel := &DataModel {
+			currentModel := &DataModel{
 				Model: filePath.Name(),
 			}
 			*dataModels = append(*dataModels, currentModel)
@@ -64,6 +63,26 @@ func inspectDruidSegmentCache(segmentLocation string, dataModels *DataModels) er
 	return nil
 }
 
+func printStatsOfSegmentsInspection(dataModels DataModels) {
+	fmt.Printf("<========================= Begining of inspection result =============================>")
+	fmt.Printf("Found %d models in druid segment cache\n", len(dataModels))
+	for _, model := range dataModels {
+		fmt.Printf("model: %s have %d segments\n", model.Model, len(model.DruidFiles))
+		fmt.Printf("Top 10 segments:\n")
+		for i := 0; i < len(model.DruidFiles) || i < 10; i++ {
+			fmt.Printf("\tsegment: %s\n", model.DruidFiles[i].DruidFile)
+		}
+		if len(model.DruidFiles) > 10 {
+			fmt.Printf("...\n...\n...\n")
+			fmt.Printf("Last 10 segments:\n")
+			for i := len(model.DruidFiles) - 10; i < len(model.DruidFiles); i++ {
+				fmt.Printf("\tsegment: %s\n", model.DruidFiles[i].DruidFile)
+			}
+		}
+	}
+	fmt.Printf("<========================= End of inspection result      =============================>")
+}
+
 func main() {
 	druidSegmentFolder := flag.String("seg", "", "mandatory - folder where druid segments are stored")
 	folderCsv := flag.String("csv", "", "mandatory - folder where druid migration tool store csv files with druid data")
@@ -90,10 +109,5 @@ func main() {
 	if err != nil {
 		global.Logger.WithError(err).Fatal("unable to inspect druid segment cache folder")
 	}
-	for _, model := range myModels {
-		fmt.Printf("model: %s\n", model.Model)
-		for _, segment := range model.DruidFiles {
-			fmt.Printf("\tsegment: %s\n", segment.DruidFile)
-		}
-	}
+	printStatsOfSegmentsInspection(myModels)
 }
