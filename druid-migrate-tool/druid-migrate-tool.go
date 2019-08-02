@@ -69,7 +69,7 @@ func printStatsOfSegmentsInspection(dataModels DataModels) {
 	for _, model := range dataModels {
 		fmt.Printf("model: %s have %d segments\n", model.Model, len(model.DruidFiles))
 		fmt.Printf("Top 10 segments:\n")
-		for i := 0; i < len(model.DruidFiles) || i < 10; i++ {
+		for i := 0; i < len(model.DruidFiles) && i < 10; i++ {
 			fmt.Printf("\tsegment: %s\n", model.DruidFiles[i].DruidFile)
 		}
 		if len(model.DruidFiles) > 10 {
