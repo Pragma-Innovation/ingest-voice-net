@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 type SegmentData struct {
@@ -83,9 +84,37 @@ func printStatsOfSegmentsInspection(dataModels DataModels) {
 	fmt.Printf("\n\n<========================= End of inspection result      =============================>\n\n")
 }
 
+func generateJavaCmdDruidTool(javaClassPath string, dirIn string, fileOut string) string {
+	if len(javaClassPath) == 0 || len(dirIn) == 0 || len(fileOut) == 0 {
+		return ""
+	} else {
+		return "java -classpath \"" + javaClassPath +
+			"\" io.druid.cli.Main tools dump-segment --directory " +
+			dirIn + " --out " + fileOut
+	}
+}
+
+func (myModel *DataModel) generateCsvFromDruidData(javaClassPath string, csvOut string, tempoFolder string) error {
+	for  i := 0; i < len(myModel.DruidFiles) && i < 10; i++ {
+		generateJavaCmdDruidTool(javaClassPath, myModel.DruidFiles[i].DruidFile, tempoFolder)
+	}
+	return nil
+}
+
+func (myModels DataModels) stripSegFileNameFromPath() {
+	for _, model := range myModels {
+		for _, segment := range model.DruidFiles {
+			segment.DruidFile = strings.Trim(segment.DruidFile, "version.bin")
+		}
+	}
+}
+
+
 func main() {
 	druidSegmentFolder := flag.String("seg", "", "mandatory - folder where druid segments are stored")
 	folderCsv := flag.String("csv", "", "mandatory - folder where druid migration tool store csv files with druid data")
+	classPath := flag.String("classpath", "", "mandatory - folder where druid java class path are stored")
+	tempoFolder := flag.String("tempo", "", "mandatory - folder where storing temporary files (druid segment tool")
 	logLevel := flag.String("log", "", "optional - log level can be: trace debug info warn error fatal panic")
 	flag.Usage = func() {
 		_, err := fmt.Fprintf(os.Stderr, "Usage of %s:\n", os.Args[0])
@@ -96,7 +125,8 @@ func main() {
 	}
 
 	flag.Parse()
-	if len(*druidSegmentFolder) == 0 || len(*folderCsv) == 0 {
+	if len(*druidSegmentFolder) == 0 || len(*folderCsv) == 0 ||
+		len(*classPath) == 0 || len(*tempoFolder) == 0 {
 		flag.Usage()
 		global.Logger.Fatal("bad parameters\n")
 	}
@@ -109,5 +139,15 @@ func main() {
 	if err != nil {
 		global.Logger.WithError(err).Fatal("unable to inspect druid segment cache folder")
 	}
+	myModels.stripSegFileNameFromPath()
 	printStatsOfSegmentsInspection(myModels)
+	for _, model := range myModels {
+		err := model.generateCsvFromDruidData(*classPath, *folderCsv, *tempoFolder)
+		if err != nil {
+			global.Logger.WithFields(logrus.Fields{
+				"error": err,
+				"model" : model.Model,
+			}).Warn("unable to generate csv")
+		}
+	}
 }
