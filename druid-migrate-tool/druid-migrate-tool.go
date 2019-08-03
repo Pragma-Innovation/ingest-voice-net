@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -94,9 +95,11 @@ func generateJavaCmdDruidTool(javaClassPath string, dirIn string, fileOut string
 	}
 }
 
-func (myModel *DataModel) generateCsvFromDruidData(javaClassPath string, csvOut string, tempoFolder string) error {
+func (myModel *DataModel) generateCsvFromDruidData(javaClassPath string, csvOut string, tempoFolder string, segPerCsv int) error {
 	for  i := 0; i < len(myModel.DruidFiles) && i < 10; i++ {
-		generateJavaCmdDruidTool(javaClassPath, myModel.DruidFiles[i].DruidFile, tempoFolder)
+		tempoFileOut := tempoFolder + generateTempoFileFromSegment(myModel.DruidFiles[i].DruidFile)
+		javaCmd := generateJavaCmdDruidTool(javaClassPath, myModel.DruidFiles[i].DruidFile, tempoFileOut)
+		fmt.Printf("cmd: %s\n", javaCmd)
 	}
 	return nil
 }
@@ -109,12 +112,18 @@ func (myModels DataModels) stripSegFileNameFromPath() {
 	}
 }
 
+func generateTempoFileFromSegment(segment string) string {
+	result := strings.SplitN(segment, "/", -1)
+	amount := len(result)
+	return result[amount-2] + "_" + result[amount-1] + "_" + "tempo.json"
+}
 
 func main() {
 	druidSegmentFolder := flag.String("seg", "", "mandatory - folder where druid segments are stored")
 	folderCsv := flag.String("csv", "", "mandatory - folder where druid migration tool store csv files with druid data")
 	classPath := flag.String("classpath", "", "mandatory - folder where druid java class path are stored")
 	tempoFolder := flag.String("tempo", "", "mandatory - folder where storing temporary files (druid segment tool")
+	segPerCsv := flag.String("segpercsv", "", "mandatory - amount of segment per csv file")
 	logLevel := flag.String("log", "", "optional - log level can be: trace debug info warn error fatal panic")
 	flag.Usage = func() {
 		_, err := fmt.Fprintf(os.Stderr, "Usage of %s:\n", os.Args[0])
@@ -126,23 +135,28 @@ func main() {
 
 	flag.Parse()
 	if len(*druidSegmentFolder) == 0 || len(*folderCsv) == 0 ||
-		len(*classPath) == 0 || len(*tempoFolder) == 0 {
+		len(*classPath) == 0 || len(*tempoFolder) == 0 || len(*segPerCsv) == 0 {
 		flag.Usage()
 		global.Logger.Fatal("bad parameters\n")
 	}
+	segPerCsvInt, err := strconv.Atoi(*segPerCsv)
+	if err != nil {
+		global.Logger.WithError(err).Fatal("unable to convert the amount of seg par csv")
+	}
+
 	if len(*logLevel) != 0 {
 		global.SetLogLevel(*logLevel)
 		global.Logger.WithField("level", *logLevel).Warn("log level has been modified to this value")
 	}
 	var myModels DataModels
-	err := inspectDruidSegmentCache(*druidSegmentFolder, &myModels)
+	err = inspectDruidSegmentCache(*druidSegmentFolder, &myModels)
 	if err != nil {
 		global.Logger.WithError(err).Fatal("unable to inspect druid segment cache folder")
 	}
 	myModels.stripSegFileNameFromPath()
 	printStatsOfSegmentsInspection(myModels)
 	for _, model := range myModels {
-		err := model.generateCsvFromDruidData(*classPath, *folderCsv, *tempoFolder)
+		err := model.generateCsvFromDruidData(*classPath, *folderCsv, *tempoFolder, segPerCsvInt)
 		if err != nil {
 			global.Logger.WithFields(logrus.Fields{
 				"error": err,
