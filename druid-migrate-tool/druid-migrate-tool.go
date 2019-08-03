@@ -97,7 +97,7 @@ func generateJavaCmdDruidTool(javaClassPath string, dirIn string, fileOut string
 
 func (myModel *DataModel) generateCsvFromDruidData(javaClassPath string, csvOut string, tempoFolder string, segPerCsv int) error {
 	for  i := 0; i < len(myModel.DruidFiles) && i < 10; i++ {
-		tempoFileOut := tempoFolder + generateTempoFileFromSegment(myModel.DruidFiles[i].DruidFile)
+		tempoFileOut := tempoFolder + "/" + generateTempoFileFromSegment(myModel.DruidFiles[i].DruidFile)
 		javaCmd := generateJavaCmdDruidTool(javaClassPath, myModel.DruidFiles[i].DruidFile, tempoFileOut)
 		fmt.Printf("cmd: %s\n", javaCmd)
 	}
@@ -115,7 +115,7 @@ func (myModels DataModels) stripSegFileNameFromPath() {
 func generateTempoFileFromSegment(segment string) string {
 	result := strings.SplitN(segment, "/", -1)
 	amount := len(result)
-	return result[amount-2] + "_" + result[amount-1] + "_" + "tempo.json"
+	return result[amount-3] + "_" + result[amount-2] + "_" + "tempo.json"
 }
 
 func main() {
