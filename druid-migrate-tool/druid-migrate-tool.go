@@ -101,12 +101,12 @@ func (myModel *DataModel) generateCsvFromDruidData(javaClassPath string, csvOut 
 	for  i := 0; i < len(myModel.DruidFiles) && i < 10; i++ {
 		tempoFileOut := tempoFolder + "/" + generateTempoFileFromSegment(myModel.DruidFiles[i].DruidFile)
 		// javaCmd := generateJavaCmdDruidTool(javaClassPath, myModel.DruidFiles[i].DruidFile, tempoFileOut)
-		path, err := exec.LookPath("java")
-		if err != nil {
-			global.Logger.WithError(err).Fatal("installing java is in your future")
-		}
+		//path, err := exec.LookPath("java")
+		//if err != nil {
+		//	global.Logger.WithError(err).Fatal("installing java is in your future")
+		//}
 		javaClassPathWithQuote := "\"" + javaClassPath + "\""
-		cmd := exec.Command(path, "-classpath", javaClassPathWithQuote, "io.druid.cli.Main tools dump-segment --directory", myModel.DruidFiles[i].DruidFile,
+		cmd := exec.Command("/usr/bin/java", "-classpath", javaClassPathWithQuote, "io.druid.cli.Main tools dump-segment --directory", myModel.DruidFiles[i].DruidFile,
 			"--out", tempoFileOut)
 		fmt.Printf("cmd: %v\n", cmd)
 		out, err := cmd.CombinedOutput()
