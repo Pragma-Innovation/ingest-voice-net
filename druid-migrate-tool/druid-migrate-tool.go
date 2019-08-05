@@ -90,6 +90,7 @@ func generateJavaCmdDruidTool(javaClassPath string, dirIn string, fileOut string
 	if len(javaClassPath) == 0 || len(dirIn) == 0 || len(fileOut) == 0 {
 		return ""
 	} else {
+		fmt.Printf("javaClassPath: %s\n", javaClassPath)
 		return " -classpath \"" + javaClassPath +
 			"\" io.druid.cli.Main tools dump-segment --directory " +
 			dirIn + " --out " + fileOut
