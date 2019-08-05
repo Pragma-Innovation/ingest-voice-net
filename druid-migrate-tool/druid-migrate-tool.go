@@ -101,7 +101,7 @@ func (myModel *DataModel) generateCsvFromDruidData(javaClassPath string, csvOut 
 		tempoFileOut := tempoFolder + "/" + generateTempoFileFromSegment(myModel.DruidFiles[i].DruidFile)
 		javaCmd := generateJavaCmdDruidTool(javaClassPath, myModel.DruidFiles[i].DruidFile, tempoFileOut)
 		cmd := exec.Command(javaCmd)
-		path, err := exec.LookPath("fortune")
+		path, err := exec.LookPath("java")
 		if err != nil {
 			global.Logger.WithError(err).Fatal("installing java is in your future")
 		}
