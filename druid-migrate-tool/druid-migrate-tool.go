@@ -101,6 +101,11 @@ func (myModel *DataModel) generateCsvFromDruidData(javaClassPath string, csvOut 
 		tempoFileOut := tempoFolder + "/" + generateTempoFileFromSegment(myModel.DruidFiles[i].DruidFile)
 		javaCmd := generateJavaCmdDruidTool(javaClassPath, myModel.DruidFiles[i].DruidFile, tempoFileOut)
 		cmd := exec.Command(javaCmd)
+		path, err := exec.LookPath("fortune")
+		if err != nil {
+			global.Logger.WithError(err).Fatal("installing java is in your future")
+		}
+		fmt.Printf("java is available at %s\n", path)
 		fmt.Printf("cmd: %v\n", cmd)
 		out, err := cmd.CombinedOutput()
 		if err != nil {
