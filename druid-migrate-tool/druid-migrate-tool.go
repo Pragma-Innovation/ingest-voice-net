@@ -90,7 +90,7 @@ func generateJavaCmdDruidTool(javaClassPath string, dirIn string, fileOut string
 	if len(javaClassPath) == 0 || len(dirIn) == 0 || len(fileOut) == 0 {
 		return ""
 	} else {
-		return "java -classpath \"" + javaClassPath +
+		return " -classpath \"" + javaClassPath +
 			"\" io.druid.cli.Main tools dump-segment --directory " +
 			dirIn + " --out " + fileOut
 	}
@@ -100,12 +100,12 @@ func (myModel *DataModel) generateCsvFromDruidData(javaClassPath string, csvOut 
 	for  i := 0; i < len(myModel.DruidFiles) && i < 10; i++ {
 		tempoFileOut := tempoFolder + "/" + generateTempoFileFromSegment(myModel.DruidFiles[i].DruidFile)
 		javaCmd := generateJavaCmdDruidTool(javaClassPath, myModel.DruidFiles[i].DruidFile, tempoFileOut)
-		cmd := exec.Command(javaCmd)
 		path, err := exec.LookPath("java")
 		if err != nil {
 			global.Logger.WithError(err).Fatal("installing java is in your future")
 		}
-		fmt.Printf("java is available at %s\n", path)
+		javaCmd = path + javaCmd
+		cmd := exec.Command(javaCmd)
 		fmt.Printf("cmd: %v\n", cmd)
 		out, err := cmd.CombinedOutput()
 		if err != nil {
