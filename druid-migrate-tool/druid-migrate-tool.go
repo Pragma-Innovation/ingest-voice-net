@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -24,6 +25,19 @@ type DataModel struct {
 }
 
 type DataModels []*DataModel
+
+type TempoFileDone struct {
+	File  string
+	Topic string
+}
+
+func tempoFileProducer(tempoFile TempoFileDone) error {
+	fmt.Printf("<=================>\n")
+	fmt.Printf("received this file: %s\n", tempoFile.File)
+	fmt.Printf("sending file content to topic: %s\n", tempoFile.Topic)
+	fmt.Printf("<=================>\n\n")
+	return nil
+}
 
 func inspectDruidSegmentCache(segmentLocation string, dataModels *DataModels) error {
 	allFilesPath, err := ioutil.ReadDir(segmentLocation)
@@ -86,34 +100,23 @@ func printStatsOfSegmentsInspection(dataModels DataModels) {
 	fmt.Printf("\n\n<========================= End of inspection result      =============================>\n\n")
 }
 
-func generateJavaCmdDruidTool(javaClassPath string, dirIn string, fileOut string) string {
-	if len(javaClassPath) == 0 || len(dirIn) == 0 || len(fileOut) == 0 {
-		return ""
-	} else {
-		fmt.Printf("javaClassPath: %s\n", javaClassPath)
-		return " -classpath " + javaClassPath +
-			" io.druid.cli.Main tools dump-segment --directory " +
-			dirIn + " --out " + fileOut
-	}
-}
-
-func (myModel *DataModel) generateCsvFromDruidData(javaClassPath string, csvOut string, tempoFolder string, segPerCsv int) error {
-	for  i := 0; i < len(myModel.DruidFiles) && i < 10; i++ {
-		tempoFileOut := tempoFolder + "/" + generateTempoFileFromSegment(myModel.DruidFiles[i].DruidFile)
-		// javaCmd := generateJavaCmdDruidTool(javaClassPath, myModel.DruidFiles[i].DruidFile, tempoFileOut)
-		//path, err := exec.LookPath("java")
-		//if err != nil {
-		//	global.Logger.WithError(err).Fatal("installing java is in your future")
-		//}
-		javaClassPathWithQuote := "\"" + javaClassPath + "\""
-		cmd := exec.Command("java", "-classpath", javaClassPathWithQuote, "io.druid.cli.Main tools dump-segment --directory", myModel.DruidFiles[i].DruidFile,
+func (myModel *DataModel) generateCsvFromDruidData(javaClassPath string, csvOut string, tempoFolder string,
+	segPerCsv int, producerChan chan TempoFileDone) error {
+	for i := 0; i < len(myModel.DruidFiles) && i < 10; i++ {
+		tempoFileOut := tempoFolder + "/" + generateTempoFileFromSegment(myModel.DruidFiles[i].DruidFile, myModel.Model)
+		cmd := exec.Command("java", "-classpath", javaClassPath, "io.druid.cli.Main", "tools", "dump-segment",
+			"--directory", myModel.DruidFiles[i].DruidFile,
 			"--out", tempoFileOut)
-		fmt.Printf("cmd: %v\n", cmd)
-		out, err := cmd.CombinedOutput()
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		err := cmd.Run()
 		if err != nil {
 			global.Logger.WithError(err).Fatal("cmd.Run() failed")
 		}
-		fmt.Printf("combined out:\n%s\n", string(out))
+		producerChan <- TempoFileDone{
+			File:  tempoFileOut,
+			Topic: myModel.Model + "_mig_topic",
+		}
 	}
 	return nil
 }
@@ -126,10 +129,10 @@ func (myModels DataModels) stripSegFileNameFromPath() {
 	}
 }
 
-func generateTempoFileFromSegment(segment string) string {
+func generateTempoFileFromSegment(segment string, model string) string {
 	result := strings.SplitN(segment, "/", -1)
 	amount := len(result)
-	return result[amount-3] + "_" + result[amount-2] + "_" + "tempo.json"
+	return model + "_" + result[amount-3] + "_" + result[amount-2] + "_" + "tempo.json"
 }
 
 func main() {
@@ -169,13 +172,44 @@ func main() {
 	}
 	myModels.stripSegFileNameFromPath()
 	printStatsOfSegmentsInspection(myModels)
-	for _, model := range myModels {
-		err := model.generateCsvFromDruidData(*classPath, *folderCsv, *tempoFolder, segPerCsvInt)
-		if err != nil {
-			global.Logger.WithFields(logrus.Fields{
-				"error": err,
-				"model" : model.Model,
-			}).Warn("unable to generate csv")
+	migrationToolSignals := make(chan os.Signal, 1)
+	signal.Notify(migrationToolSignals, os.Interrupt)
+	// channel to close program only once all routines are over
+	doneCh := make(chan bool, 1)
+	tempoFileCh := make(chan TempoFileDone)
+	// go routine to interrupt program
+	go func() {
+		for mySig := range migrationToolSignals {
+			global.Logger.WithField("signal", mySig).Warn("signal received")
+			doneCh <- true
 		}
-	}
+	}()
+	// routine to send druid dump tool file content to kafka
+	go func() {
+		for tempoFile := range tempoFileCh {
+			err := tempoFileProducer(tempoFile)
+			if err != nil {
+				global.Logger.WithFields(logrus.Fields{
+					"file":  tempoFile.File,
+					"topic": tempoFile.Topic,
+				}).Warn("unable to produce this file")
+			}
+		}
+	}()
+	// go routine to run druid segment dump tool
+	go func() {
+		for _, model := range myModels {
+			err := model.generateCsvFromDruidData(*classPath, *folderCsv, *tempoFolder, segPerCsvInt, tempoFileCh)
+			if err != nil {
+				global.Logger.WithFields(logrus.Fields{
+					"error": err,
+					"model": model.Model,
+				}).Warn("unable to generate csv")
+			}
+		}
+		global.Logger.Info("exiting loop running druid migration tool")
+	}()
+	global.Logger.Info("Migration tool launched ... waiting for signals")
+	<-doneCh
+	global.Logger.Info("Interrupt received exiting migration tool ...")
 }
