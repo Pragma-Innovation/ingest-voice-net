@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"github.com/Pragma-Innovation/ingest-voice-net/global"
@@ -36,6 +37,19 @@ func tempoFileProducer(tempoFile TempoFileDone) error {
 	fmt.Printf("received this file: %s\n", tempoFile.File)
 	fmt.Printf("sending file content to topic: %s\n", tempoFile.Topic)
 	fmt.Printf("<=================>\n\n")
+	var lineCounter int
+	if tempoFileDescr, err := os.Open(tempoFile.File); err == nil {
+		defer tempoFileDescr.Close()
+		scanner := bufio.NewScanner(tempoFileDescr)
+		for scanner.Scan() {
+			lineCounter++
+		}
+	}
+	fmt.Printf("produced %d lines\n", lineCounter)
+	err := os.Remove(tempoFile.File)
+	if err != nil {
+		global.Logger.WithError(err).Fatal("Unable to delete temporary druid migration file")
+	}
 	return nil
 }
 
@@ -187,12 +201,18 @@ func main() {
 	// routine to send druid dump tool file content to kafka
 	go func() {
 		for tempoFile := range tempoFileCh {
-			err := tempoFileProducer(tempoFile)
-			if err != nil {
-				global.Logger.WithFields(logrus.Fields{
-					"file":  tempoFile.File,
-					"topic": tempoFile.Topic,
-				}).Warn("unable to produce this file")
+			if tempoFile.File == "end" {
+				global.Logger.Warn("received exiting file end")
+				doneCh <- true
+				return
+			} else {
+				err := tempoFileProducer(tempoFile)
+				if err != nil {
+					global.Logger.WithFields(logrus.Fields{
+						"file":  tempoFile.File,
+						"topic": tempoFile.Topic,
+					}).Warn("unable to produce this file")
+				}
 			}
 		}
 	}()
@@ -207,7 +227,12 @@ func main() {
 				}).Warn("unable to generate csv")
 			}
 		}
+		tempoFileCh <- TempoFileDone {
+			File:  "end",
+			Topic: "end",
+		}
 		global.Logger.Info("exiting loop running druid migration tool")
+		return
 	}()
 	global.Logger.Info("Migration tool launched ... waiting for signals")
 	<-doneCh
