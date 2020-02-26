@@ -2,17 +2,21 @@ package main
 
 import (
 	"bufio"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"github.com/Pragma-Innovation/ingest-voice-net/global"
+	"github.com/Shopify/sarama"
 	"github.com/sirupsen/logrus"
 	"io/ioutil"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"strconv"
 	"strings"
+	"time"
 )
 
 type SegmentData struct {
@@ -32,17 +36,114 @@ type TempoFileDone struct {
 	Topic string
 }
 
-func tempoFileProducer(tempoFile TempoFileDone) error {
+type UserKafkaConfig struct {
+	BrokerListWithPort []string `json:"kafka-brokers,omitempty"`
+	Topic              string   `json:"kafka-topic,omitempty"`
+	MessageKey         string   `json:"kafka-msg-key,omitempty"`
+	KafkaCertFile      string   `json:"kafka-tls-cert-file,omitempty"`
+	KafkaKeyFile       string   `json:"kafka-tls-Key-file,omitempty"`
+	KafkaCaFile        string   `json:"kafka-tls-Ca-file,omitempty"`
+	KafkaVerifySsl     bool     `json:"kafka-tls-vfy-bool,omitempty"`
+}
+
+var KafkaMigProducerConf UserKafkaConfig
+
+func ReadKafkaProducerConfigFromFile(myFile string, myKafkaConf *UserKafkaConfig) error {
+	dataBuf, err := ioutil.ReadFile(myFile)
+	if err != nil {
+		global.Logger.WithFields(logrus.Fields{
+			"file":  myFile,
+			"error": err,
+		}).Fatal("Unable to read global kafka parameter JSON file")
+	}
+	err = json.Unmarshal(dataBuf, &myKafkaConf)
+	if err != nil {
+		global.Logger.WithError(err).Fatal("unable to convert Kafka JSON into a struct")
+		return err
+	}
+	global.Logger.Info("Global Kafka parameters loaded")
+	return nil
+}
+
+func createTlsConfiguration(myKafkaCertFile string, myKafkaKeyFile string,
+	myKafkaCaFile string, myKafkaVerifySsl bool) (t *tls.Config) {
+	if myKafkaCertFile != "" && myKafkaKeyFile != "" && myKafkaCaFile != "" {
+		cert, err := tls.LoadX509KeyPair(myKafkaCertFile, myKafkaKeyFile)
+		if err != nil {
+			global.Logger.WithError(err).Fatal("Unable to load X509 keys")
+		}
+
+		caCert, err := ioutil.ReadFile(myKafkaCaFile)
+		if err != nil {
+			global.Logger.WithError(err).Fatal("Unable to read Cert file")
+		}
+
+		caCertPool := x509.NewCertPool()
+		caCertPool.AppendCertsFromPEM(caCert)
+
+		t = &tls.Config{
+			Certificates:       []tls.Certificate{cert},
+			RootCAs:            caCertPool,
+			InsecureSkipVerify: myKafkaVerifySsl,
+		}
+	}
+	// will be nil by default if nothing is provided
+	return t
+}
+
+func NewKafkaAsynProducer(myKafkaConfig UserKafkaConfig) sarama.AsyncProducer {
+	// let's check if we have all we need
+	if len(myKafkaConfig.BrokerListWithPort) == 0 {
+		flag.PrintDefaults()
+		global.Logger.Fatal("missing required argument for Kafka producer")
+	}
+	// create snmp stats producer on kafka broker
+	// no need to check return as program exits if kafka fails
+	producerConfig := sarama.NewConfig()
+	producerTlsConfig := createTlsConfiguration(myKafkaConfig.KafkaCertFile,
+		myKafkaConfig.KafkaKeyFile, myKafkaConfig.KafkaCaFile,
+		myKafkaConfig.KafkaVerifySsl)
+	if producerTlsConfig != nil {
+		producerConfig.Net.TLS.Enable = true
+		producerConfig.Net.TLS.Config = producerTlsConfig
+	}
+	producerConfig.Producer.RequiredAcks = sarama.WaitForAll         // Only wait for the leader to ack
+	producerConfig.Producer.Compression = sarama.CompressionSnappy   // Compress messages
+	producerConfig.Producer.Flush.Frequency = 500 * time.Millisecond // Flush batches every 500ms
+	// assumes we fill up the queue un in this timeout
+	producerConfig.ChannelBufferSize = 4000 // Buffer of messages
+	cdrProducer, err := sarama.NewAsyncProducer(myKafkaConfig.BrokerListWithPort, producerConfig)
+	if err != nil {
+		global.Logger.WithError(err).Fatal("unable to launch kafka producer")
+	}
+	return cdrProducer
+}
+
+func tempoFileProducer(tempoFile TempoFileDone, migProducer sarama.AsyncProducer) error {
 	fmt.Printf("<=================>\n")
 	fmt.Printf("received this file: %s\n", tempoFile.File)
 	fmt.Printf("sending file content to topic: %s\n", tempoFile.Topic)
 	fmt.Printf("<=================>\n\n")
 	var lineCounter int
+	var kafkaErrors int
+	betterJson := strings.NewReplacer("\":", "\": ", ",\"", ", \"", "null", "\"\"")
 	if tempoFileDescr, err := os.Open(tempoFile.File); err == nil {
 		defer tempoFileDescr.Close()
 		scanner := bufio.NewScanner(tempoFileDescr)
 		for scanner.Scan() {
-			lineCounter++
+			cleanerJson := betterJson.Replace(scanner.Text())
+			cdrMessage := cleanerJson + "\n"
+			msg := &sarama.ProducerMessage{
+				Topic: tempoFile.Topic,
+				Key:   sarama.StringEncoder("no key"),
+				Value: sarama.StringEncoder(cdrMessage)}
+			select {
+			case migProducer.Input() <- msg:
+				lineCounter++
+			case err := <-migProducer.Errors():
+				kafkaErrors++
+				global.Logger.WithError(err).Warn("Failed to produce message")
+			}
 		}
 	}
 	fmt.Printf("produced %d lines\n", lineCounter)
@@ -53,7 +154,8 @@ func tempoFileProducer(tempoFile TempoFileDone) error {
 	return nil
 }
 
-func inspectDruidSegmentCache(segmentLocation string, dataModels *DataModels) error {
+func inspectDruidSegmentCache(segmentLocation string, modelOnly string, fileFilter string,
+	dataModels *DataModels) error {
 	allFilesPath, err := ioutil.ReadDir(segmentLocation)
 	if err != nil {
 		global.Logger.WithError(err).Fatal("Unable to read druid segment cache folder")
@@ -64,16 +166,23 @@ func inspectDruidSegmentCache(segmentLocation string, dataModels *DataModels) er
 	}
 	for _, filePath := range allFilesPath {
 		if filePath.Name() != ".DS_Store" {
-			currentModel := &DataModel{
-				Model: filePath.Name(),
+			if len(modelOnly) != 0 && filePath.Name() == modelOnly {
+				currentModel := &DataModel{
+					Model: filePath.Name(),
+				}
+				*dataModels = append(*dataModels, currentModel)
+			} else if len(modelOnly) == 0 {
+				currentModel := &DataModel{
+					Model: filePath.Name(),
+				}
+				*dataModels = append(*dataModels, currentModel)
 			}
-			*dataModels = append(*dataModels, currentModel)
 		}
 	}
 	for _, model := range *dataModels {
 		modelPath := segmentLocation + "/" + model.Model
 		err := filepath.Walk(modelPath, func(path string, info os.FileInfo, err error) error {
-			if filepath.Ext(path) == ".bin" {
+			if filepath.Ext(path) == ".bin" && strings.Contains(path, fileFilter) {
 				druidFile := &SegmentData{
 					DruidFile: path,
 					Converted: false,
@@ -114,9 +223,9 @@ func printStatsOfSegmentsInspection(dataModels DataModels) {
 	fmt.Printf("\n\n<========================= End of inspection result      =============================>\n\n")
 }
 
-func (myModel *DataModel) generateCsvFromDruidData(javaClassPath string, csvOut string, tempoFolder string,
-	segPerCsv int, producerChan chan TempoFileDone) error {
-	for i := 0; i < len(myModel.DruidFiles) && i < 10; i++ {
+func (myModel *DataModel) generateCsvFromDruidData(javaClassPath string, tempoFolder string,
+	producerChan chan TempoFileDone) error {
+	for i := 0; i < len(myModel.DruidFiles); i++ {
 		tempoFileOut := tempoFolder + "/" + generateTempoFileFromSegment(myModel.DruidFiles[i].DruidFile, myModel.Model)
 		cmd := exec.Command("java", "-classpath", javaClassPath, "io.druid.cli.Main", "tools", "dump-segment",
 			"--directory", myModel.DruidFiles[i].DruidFile,
@@ -151,11 +260,12 @@ func generateTempoFileFromSegment(segment string, model string) string {
 
 func main() {
 	druidSegmentFolder := flag.String("seg", "", "mandatory - folder where druid segments are stored")
-	folderCsv := flag.String("csv", "", "mandatory - folder where druid migration tool store csv files with druid data")
 	classPath := flag.String("classpath", "", "mandatory - folder where druid java class path are stored")
 	tempoFolder := flag.String("tempo", "", "mandatory - folder where storing temporary files (druid segment tool")
-	segPerCsv := flag.String("segpercsv", "", "mandatory - amount of segment per csv file")
 	logLevel := flag.String("log", "", "optional - log level can be: trace debug info warn error fatal panic")
+	modelOnly := flag.String("model", "", "optional - give the name a a specific model you want to migrate")
+	fileFilter := flag.String("filter", "", "optional - substring that segment name needs to include to be processed")
+	kafkaConfFile := flag.String("kafka", "", "mandatory - path to the kafka producer configuration")
 	flag.Usage = func() {
 		_, err := fmt.Fprintf(os.Stderr, "Usage of %s:\n", os.Args[0])
 		if err != nil {
@@ -165,22 +275,26 @@ func main() {
 	}
 
 	flag.Parse()
-	if len(*druidSegmentFolder) == 0 || len(*folderCsv) == 0 ||
-		len(*classPath) == 0 || len(*tempoFolder) == 0 || len(*segPerCsv) == 0 {
+	if len(*druidSegmentFolder) == 0 || len(*kafkaConfFile) == 0 ||
+		len(*classPath) == 0 || len(*tempoFolder) == 0 {
 		flag.Usage()
 		global.Logger.Fatal("bad parameters\n")
 	}
-	segPerCsvInt, err := strconv.Atoi(*segPerCsv)
-	if err != nil {
-		global.Logger.WithError(err).Fatal("unable to convert the amount of seg par csv")
-	}
-
 	if len(*logLevel) != 0 {
 		global.SetLogLevel(*logLevel)
 		global.Logger.WithField("level", *logLevel).Warn("log level has been modified to this value")
 	}
+	err := ReadKafkaProducerConfigFromFile(*kafkaConfFile, &KafkaMigProducerConf)
+	if err != nil {
+		global.Logger.Warn("unable to load kafka global configuration file, keeping default")
+	}
+	// we create an async producer, if it fails program will end
+	migProducer := NewKafkaAsynProducer(KafkaMigProducerConf)
+	if err != nil {
+		global.Logger.Fatal("unable to launch kafka async producer")
+	}
 	var myModels DataModels
-	err = inspectDruidSegmentCache(*druidSegmentFolder, &myModels)
+	err = inspectDruidSegmentCache(*druidSegmentFolder, *modelOnly, *fileFilter, &myModels)
 	if err != nil {
 		global.Logger.WithError(err).Fatal("unable to inspect druid segment cache folder")
 	}
@@ -206,7 +320,7 @@ func main() {
 				doneCh <- true
 				return
 			} else {
-				err := tempoFileProducer(tempoFile)
+				err := tempoFileProducer(tempoFile, migProducer)
 				if err != nil {
 					global.Logger.WithFields(logrus.Fields{
 						"file":  tempoFile.File,
@@ -219,7 +333,7 @@ func main() {
 	// go routine to run druid segment dump tool
 	go func() {
 		for _, model := range myModels {
-			err := model.generateCsvFromDruidData(*classPath, *folderCsv, *tempoFolder, segPerCsvInt, tempoFileCh)
+			err := model.generateCsvFromDruidData(*classPath, *tempoFolder, tempoFileCh)
 			if err != nil {
 				global.Logger.WithFields(logrus.Fields{
 					"error": err,
@@ -227,7 +341,7 @@ func main() {
 				}).Warn("unable to generate csv")
 			}
 		}
-		tempoFileCh <- TempoFileDone {
+		tempoFileCh <- TempoFileDone{
 			File:  "end",
 			Topic: "end",
 		}

@@ -805,18 +805,16 @@ func (myCdr *CirCdr) EnrichWibLibPhone() error {
 	}
 	myRealCalled, myNatOfRealCalled, err := getStandardCalledNumFromCirCdrPack(myCdr.cirCdrPacks[0])
 	if err != nil {
-		global.Logger.WithError(err).Warn("Error creating E164 number, doing the best we can ... ")
+		global.Logger.WithError(err).Warn("Error creating E164 called number, doing the best we can ... ")
 	}
 	switch myNatOfRealCalled {
 	case "2", "0":
 		{
 			myCdr.LibPhoneEnrich = fmt.Sprintf("\"called_country_code\": \"unknown code\", \"called_country\": \"ZZ\", \"called_number_type\": \"unknown type\", \"called_number_location\": \"unknown location\"")
-			return nil
 		}
 	case "115":
 		{
 			myCdr.LibPhoneEnrich = fmt.Sprintf("\"called_country_code\": \"33\", \"called_country\": \"FR\", \"called_number_type\": \"short num\", \"called_number_location\": \"unknown location\"")
-			return nil
 		}
 	default:
 		// removing too buggy called number before calling the libphonenumber
@@ -824,8 +822,40 @@ func (myCdr *CirCdr) EnrichWibLibPhone() error {
 			myCdr.LibPhoneEnrich = PstnColumnFromCalledNum(myRealCalled)
 		}
 	}
+	myRealCalling, myNatOfRealCalling, err := getStandardCallingNumFromCirCdrPack(myCdr.cirCdrPacks[0])
+	if err != nil {
+		global.Logger.WithError(err).Warn("Error creating E164 calling number, doing the best we can ... ")
+	}
+	switch myNatOfRealCalling {
+	case "2", "0":
+		{
+			if len(myCdr.LibPhoneEnrich) != 0 {
+				myCdr.LibPhoneEnrich = myCdr.LibPhoneEnrich + ", \"calling_country_code\": \"unknown code\", \"calling_country\": \"ZZ\", \"calling_number_type\": \"unknown type\", \"calling_number_location\": \"unknown location\""
+			} else {
+				myCdr.LibPhoneEnrich = "\"calling_country_code\": \"unknown code\", \"calling_country\": \"ZZ\", \"calling_number_type\": \"unknown type\", \"calling_number_location\": \"unknown location\""
+			}
+			return nil
+		}
+	case "115":
+		{
+			if len(myCdr.LibPhoneEnrich) != 0 {
+				myCdr.LibPhoneEnrich = myCdr.LibPhoneEnrich + ", \"calling_country_code\": \"33\", \"calling_country\": \"FR\", \"calling_number_type\": \"short num\", \"calling_number_location\": \"unknown location\""
+			} else {
+				myCdr.LibPhoneEnrich = "\"calling_country_code\": \"33\", \"calling_country\": \"FR\", \"calling_number_type\": \"short num\", \"calling_number_location\": \"unknown location\""
+			}
+			return nil
+		}
+	default:
+		// removing too buggy called number before calling the libphonenumber
+		if !strings.Contains(myRealCalling, "+0") {
+			if len(myCdr.LibPhoneEnrich) != 0 {
+				myCdr.LibPhoneEnrich = myCdr.LibPhoneEnrich + ", " + PstnColumnFromCallingNum(myRealCalling)
+			} else {
+				myCdr.LibPhoneEnrich = PstnColumnFromCallingNum(myRealCalling)
+			}
+		}
+	}
 	return nil
-
 }
 
 // Function summary: this function take a CDR in a string format (unparsed) and
@@ -840,36 +870,57 @@ func getStandardCalledNumFromCirCdrPack(myCirCdrPack string) (string, string, er
 		global.Logger.WithError(err).Warn("Unable to convert CDR std pack to json slice")
 		return "", "", err
 	}
-	switch splittedDruidBasicPack[JsonBpckNatRealCalledNum] {
+	return getStandardNumFromRawNumber(splittedDruidBasicPack[JsonBpckNatRealCalledNum],
+		splittedDruidBasicPack[JsonBpckRealCalledNum])
+}
+
+// Same for calling number
+func getStandardCallingNumFromCirCdrPack(myCirCdrPack string) (string, string, error) {
+	if len(myCirCdrPack) == 0 {
+		global.Logger.Warn("Cannot enrich an empty cirpack standard package")
+		return "", "", fmt.Errorf("empty parameter")
+	}
+	splittedDruidBasicPack, err := convertCirBasicPackToJsonStringSlice(myCirCdrPack)
+	if err != nil {
+		global.Logger.WithError(err).Warn("Unable to convert CDR std pack to json slice")
+		return "", "", err
+	}
+	return getStandardNumFromRawNumber(splittedDruidBasicPack[JsonBpckNatCallingNum],
+		splittedDruidBasicPack[JsonBpckCallingNum])
+}
+
+
+func getStandardNumFromRawNumber(myNatureOfNumber string, myNumber string) (string, string, error) {
+	switch myNatureOfNumber {
 	case "3": // national call
-		if strings.HasPrefix(splittedDruidBasicPack[JsonBpckRealCalledNum], "262") ||
-		strings.HasPrefix(splittedDruidBasicPack[JsonBpckRealCalledNum], "692") ||
-		strings.HasPrefix(splittedDruidBasicPack[JsonBpckRealCalledNum], "693") {
-			return "+262" + splittedDruidBasicPack[JsonBpckRealCalledNum], splittedDruidBasicPack[JsonBpckNatRealCalledNum], nil
-		} else if strings.HasPrefix(splittedDruidBasicPack[JsonBpckRealCalledNum], "590") ||
-			strings.HasPrefix(splittedDruidBasicPack[JsonBpckRealCalledNum], "690") {
-			return "+590" + splittedDruidBasicPack[JsonBpckRealCalledNum], splittedDruidBasicPack[JsonBpckNatRealCalledNum], nil
-		} else if strings.HasPrefix(splittedDruidBasicPack[JsonBpckRealCalledNum], "594") ||
-			strings.HasPrefix(splittedDruidBasicPack[JsonBpckRealCalledNum], "694") {
-			return "+594" + splittedDruidBasicPack[JsonBpckRealCalledNum], splittedDruidBasicPack[JsonBpckNatRealCalledNum], nil
-		} else if strings.HasPrefix(splittedDruidBasicPack[JsonBpckRealCalledNum], "596") ||
-			strings.HasPrefix(splittedDruidBasicPack[JsonBpckRealCalledNum], "696") {
-			return "+596" + splittedDruidBasicPack[JsonBpckRealCalledNum], splittedDruidBasicPack[JsonBpckNatRealCalledNum], nil
+		if strings.HasPrefix(myNumber, "262") ||
+			strings.HasPrefix(myNumber, "692") ||
+			strings.HasPrefix(myNumber, "693") {
+			return "+262" + myNumber, myNatureOfNumber, nil
+		} else if strings.HasPrefix(myNumber, "590") ||
+			strings.HasPrefix(myNumber, "690") {
+			return "+590" + myNumber, myNatureOfNumber, nil
+		} else if strings.HasPrefix(myNumber, "594") ||
+			strings.HasPrefix(myNumber, "694") {
+			return "+594" + myNumber, myNatureOfNumber, nil
+		} else if strings.HasPrefix(myNumber, "596") ||
+			strings.HasPrefix(myNumber, "696") {
+			return "+596" + myNumber, myNatureOfNumber, nil
 		} else {
-			return "+33" + splittedDruidBasicPack[JsonBpckRealCalledNum], splittedDruidBasicPack[JsonBpckNatRealCalledNum], nil
+			return "+33" + myNumber, myNatureOfNumber, nil
 		}
 	case "4": // international calls
-		return "+" + splittedDruidBasicPack[JsonBpckRealCalledNum], splittedDruidBasicPack[JsonBpckNatRealCalledNum], nil
+		return "+" + myNumber, myNatureOfNumber, nil
 	case "2":
-		return "", splittedDruidBasicPack[JsonBpckNatRealCalledNum], fmt.Errorf("libphone cannot deal with unknown number")
+		return "", myNatureOfNumber, fmt.Errorf("libphone cannot deal with unknown number")
 	case "115":
-		return "", splittedDruidBasicPack[JsonBpckNatRealCalledNum], fmt.Errorf("libphone cannot deal with short number")
+		return "", myNatureOfNumber, fmt.Errorf("libphone cannot deal with short number")
 	default:
-		global.Logger.WithField("nature of real called", splittedDruidBasicPack[JsonBpckNatRealCalledNum]).Warn("unknown nature")
-		return "", splittedDruidBasicPack[JsonBpckNatRealCalledNum], fmt.Errorf("nature of real called unknown")
+		global.Logger.WithField("nature of real called", myNatureOfNumber).Warn("unknown nature")
+		return "", myNatureOfNumber, fmt.Errorf("nature of real called unknown")
 	}
-	return "", "", fmt.Errorf("error function getStandardCalledNumFromCirCdrPack")
 }
+
 
 func convertCdrFileNameToTimeStamp(myFileName string) (string, error){
 	splittedFileName := strings.Split(myFileName, "_")

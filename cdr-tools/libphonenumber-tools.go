@@ -45,3 +45,27 @@ func PstnColumnFromCalledNum(myNumber string) string {
 		geo + "\""
 	return result
 }
+
+func PstnColumnFromCallingNum(myNumber string) string {
+	num, err := phonenumbers.Parse(myNumber, "FR")
+	if err != nil {
+		global.Logger.WithFields(logrus.Fields{
+			"error": err,
+			"number": myNumber,
+		}).Info("unable to parse number")
+		return ""
+	}
+
+	geo, err := phonenumbers.GetGeocodingForNumber(num, "fr")
+	if err != nil {
+		global.Logger.WithFields(logrus.Fields{
+			"error": err,
+			"number": myNumber,
+		}).Info("unable to GeoCode this number")
+	}
+	result := "\"calling_country_code\": \"" + strconv.Itoa(int(num.GetCountryCode())) + "\", \"calling_country\": \"" +
+		phonenumbers.GetRegionCodeForNumber(num) + "\", \"calling_number_type\": \"" +
+		descNumTypeFromType[phonenumbers.GetNumberType(num)] + "\", \"calling_number_location\": \"" +
+		geo + "\""
+	return result
+}

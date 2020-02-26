@@ -1,0 +1,9 @@
+{
+  "kafka-brokers": ["172.16.1.11:9092"],
+  "kafka-topic": "",
+  "kafka-msg-key": "static-key",
+  "kafka-tls-cert-file": "",
+  "kafka-tls-Key-file": "",
+  "kafka-tls-Ca-file": "",
+  "kafka-tls-vfy-bool": false
+}
