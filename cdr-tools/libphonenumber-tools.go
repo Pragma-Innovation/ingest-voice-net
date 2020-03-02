@@ -39,9 +39,9 @@ func PstnColumnFromCalledNum(myNumber string) string {
 			"number": myNumber,
 		}).Info("unable to GeoCode this number")
 	}
-	result := "\"called_country_code\": \"" + strconv.Itoa(int(num.GetCountryCode())) + "\", \"called_country\": \"" +
-		phonenumbers.GetRegionCodeForNumber(num) + "\", \"called_number_type\": \"" +
-		descNumTypeFromType[phonenumbers.GetNumberType(num)] + "\", \"called_number_location\": \"" +
+	result := "\"called_country_code\":\"" + strconv.Itoa(int(num.GetCountryCode())) + "\",\"called_country\":\"" +
+		phonenumbers.GetRegionCodeForNumber(num) + "\",\"called_number_type\":\"" +
+		descNumTypeFromType[phonenumbers.GetNumberType(num)] + "\",\"called_number_location\":\"" +
 		geo + "\""
 	return result
 }
@@ -63,9 +63,9 @@ func PstnColumnFromCallingNum(myNumber string) string {
 			"number": myNumber,
 		}).Info("unable to GeoCode this number")
 	}
-	result := "\"calling_country_code\": \"" + strconv.Itoa(int(num.GetCountryCode())) + "\", \"calling_country\": \"" +
-		phonenumbers.GetRegionCodeForNumber(num) + "\", \"calling_number_type\": \"" +
-		descNumTypeFromType[phonenumbers.GetNumberType(num)] + "\", \"calling_number_location\": \"" +
+	result := "\"calling_country_code\":\"" + strconv.Itoa(int(num.GetCountryCode())) + "\",\"calling_country\":\"" +
+		phonenumbers.GetRegionCodeForNumber(num) + "\",\"calling_number_type\":\"" +
+		descNumTypeFromType[phonenumbers.GetNumberType(num)] + "\",\"calling_number_location\":\"" +
 		geo + "\""
 	return result
 }

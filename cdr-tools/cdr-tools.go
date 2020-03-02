@@ -450,14 +450,14 @@ func (myCdr *CirCdr) convertCirBasicPackToJson() (string, error) {
 	for index := 0; index < len(jsonBasicPackColNameMap); index++ {
 		if jsonBasicPackCol(index) == JsonBpckConnDur || jsonBasicPackCol(index) == JsonBpckConnDurRg ||
 			jsonBasicPackCol(index) == JsonBpckTotDur {
-			druidBasicPack = fmt.Sprintf("%s\"%s\": %s, ", druidBasicPack,
+			druidBasicPack = fmt.Sprintf("%s\"%s\":%s,", druidBasicPack,
 				jsonBasicPackColNameMap[jsonBasicPackCol(index)], splittedDruidBasicPack[index])
 		} else {
-			druidBasicPack = fmt.Sprintf("%s\"%s\": \"%s\", ", druidBasicPack,
+			druidBasicPack = fmt.Sprintf("%s\"%s\":\"%s\",", druidBasicPack,
 				jsonBasicPackColNameMap[jsonBasicPackCol(index)], splittedDruidBasicPack[index])
 		}
 	}
-	druidBasicPack = strings.TrimSuffix(druidBasicPack, ", ")
+	druidBasicPack = strings.TrimSuffix(druidBasicPack, ",")
 	return druidBasicPack, nil
 }
 
@@ -528,14 +528,14 @@ func convertRtpPackIntoJson(myCirRtpPack string) string {
 		if jsonRtpPackCol(index) == JsonRtpPackAddiInfo || jsonRtpPackCol(index) == JsonRtpPackIp ||
 			jsonRtpPackCol(index) == JsonRtpPackPort {
 			jsonRtpPack = jsonRtpPack + "\"" + jsonRtpPackColNameMap[jsonRtpPackCol(index)] +
-				"\": \"" + rtpPackSlice[index] + "\", "
+				"\":\"" + rtpPackSlice[index] + "\","
 		} else {
 			jsonRtpPack = jsonRtpPack + "\"" + jsonRtpPackColNameMap[jsonRtpPackCol(index)] +
-				"\": " + rtpPackSlice[index] + ", "
+				"\":" + rtpPackSlice[index] + ","
 		}
 
 	}
-	jsonRtpPack = strings.TrimSuffix(jsonRtpPack, ", ")
+	jsonRtpPack = strings.TrimSuffix(jsonRtpPack, ",")
 	return jsonRtpPack
 }
 
@@ -548,7 +548,7 @@ func convertCirBasicPackTimeToDruidTimeStamp(myCallDate string, myCallTime strin
 			"call date": myCallDate,
 		}).Warn("Call date badly formatted unable to convert into JSON")
 		err := fmt.Errorf("call Date field badly formatted %s", myCallDate)
-		return "", "", "", err
+		return "","","", err
 	}
 	myYear := myCallDate[0:4]
 	myMonth := myCallDate[4:6]
@@ -557,15 +557,15 @@ func convertCirBasicPackTimeToDruidTimeStamp(myCallDate string, myCallTime strin
 	// let's do a sanity check of date value
 	if i, err := strconv.Atoi(myYear); err != nil || (i < 1900 && i > 2999) {
 		err := fmt.Errorf("year badly formatted %s", myYear)
-		return "", "", "", err
+		return "","","", err
 	}
 	if i, err := strconv.Atoi(myMonth); err != nil || (i < 1 && i > 12) {
 		err := fmt.Errorf("month badly formatted %s", myMonth)
-		return "", "", "", err
+		return "","","", err
 	}
 	if i, err := strconv.Atoi(myDay); err != nil || (i < 1 && i > 31) {
 		err := fmt.Errorf("day badly formatted %s", myDay)
-		return "", "", "", err
+		return "","","", err
 	}
 	myHours := myCallTime[0:2]
 	myMins := myCallTime[2:4]
@@ -573,15 +573,15 @@ func convertCirBasicPackTimeToDruidTimeStamp(myCallDate string, myCallTime strin
 	// let's do some sanity check of the time value
 	if i, err := strconv.Atoi(myHours); err != nil || (i > 24) {
 		err := fmt.Errorf("hour in time badly formatted %s", myHours)
-		return "", "", "", err
+		return "","","", err
 	}
 	if i, err := strconv.Atoi(myMins); err != nil || (i > 59) {
 		err := fmt.Errorf("mimutes in time badly formatted %s", myMins)
-		return "", "", "", err
+		return "","","", err
 	}
 	if i, err := strconv.Atoi(mySecs); err != nil || (i > 59) {
 		err := fmt.Errorf("seconds in time badly formatted %s", mySecs)
-		return "", "", "", err
+		return "","","", err
 	}
 	// looks good let's format java style time stamp
 	return fmt.Sprintf("%s-%s-%s", myYear, myMonth, myDay),
@@ -771,9 +771,9 @@ func (myCdr *CirCdr) JsonEncode() error {
 	// initialize string to ""
 	myCdr.JsonEncoded = ""
 	cdrAppTag := reflect.TypeOf(*myCdr).Field(1).Tag
-	appFlagKeyValue := string(cdrAppTag) + ": \"" + myCdr.AppFlag + "\""
+	appFlagKeyValue := string(cdrAppTag) + ":\"" + myCdr.AppFlag + "\""
 	cdrTimeStamp := reflect.TypeOf(*myCdr).Field(2).Tag
-	timestampKeyValue := string(cdrTimeStamp) + ": \"" + myCdr.IngestTime + "\""
+	timestampKeyValue := string(cdrTimeStamp) + ":\"" + myCdr.IngestTime + "\""
 	basicPackJson, err := myCdr.convertCirBasicPackToJson()
 	if err != nil {
 		global.Logger.WithError(err).Warn("unable to convert cdr std package in JSON")
@@ -784,12 +784,12 @@ func (myCdr *CirCdr) JsonEncode() error {
 		global.Logger.WithError(err).Warn("unable to convert cdr optional packages in JSON")
 		return err
 	}
-	myCdr.JsonEncoded = "{" + appFlagKeyValue + ", " + timestampKeyValue + ", " + basicPackJson
+	myCdr.JsonEncoded = "{" + appFlagKeyValue + "," + timestampKeyValue + "," + basicPackJson
 	if len(optionalPack) != 0 {
-		myCdr.JsonEncoded = myCdr.JsonEncoded + ", " + optionalPack
+		myCdr.JsonEncoded = myCdr.JsonEncoded + "," + optionalPack
 	}
 	if len(myCdr.LibPhoneEnrich) != 0 {
-		myCdr.JsonEncoded = myCdr.JsonEncoded + ", " + myCdr.LibPhoneEnrich
+		myCdr.JsonEncoded = myCdr.JsonEncoded + "," + myCdr.LibPhoneEnrich
 	}
 	myCdr.JsonEncoded = myCdr.JsonEncoded + "}\n"
 	return nil
@@ -799,6 +799,8 @@ func (myCdr *CirCdr) JsonEncode() error {
 // within the CDR structure geoloc/analysis... of called number
 
 func (myCdr *CirCdr) EnrichWibLibPhone() error {
+	var calledGeo string
+	var callingGeo string
 	if len(myCdr.cirCdrPacks) == 0 {
 		global.Logger.Warn("Cannot enrich an empty cirpack standard package")
 		return fmt.Errorf("empty cirpack std package")
@@ -810,16 +812,19 @@ func (myCdr *CirCdr) EnrichWibLibPhone() error {
 	switch myNatOfRealCalled {
 	case "2", "0":
 		{
-			myCdr.LibPhoneEnrich = fmt.Sprintf("\"called_country_code\": \"unknown code\", \"called_country\": \"ZZ\", \"called_number_type\": \"unknown type\", \"called_number_location\": \"unknown location\"")
+			myCdr.LibPhoneEnrich = fmt.Sprintf("\"called_country_code\":\"unknown code\",\"called_country\":\"ZZ\",\"called_number_type\":\"unknown type\",\"called_number_location\":\"unknown location\"")
 		}
 	case "115":
 		{
-			myCdr.LibPhoneEnrich = fmt.Sprintf("\"called_country_code\": \"33\", \"called_country\": \"FR\", \"called_number_type\": \"short num\", \"called_number_location\": \"unknown location\"")
+			myCdr.LibPhoneEnrich = fmt.Sprintf("\"called_country_code\":\"33\",\"called_country\":\"FR\",\"called_number_type\":\"short num\",\"called_number_location\":\"unknown location\"")
 		}
 	default:
 		// removing too buggy called number before calling the libphonenumber
 		if !strings.Contains(myRealCalled, "+0") {
-			myCdr.LibPhoneEnrich = PstnColumnFromCalledNum(myRealCalled)
+			calledGeo = PstnColumnFromCalledNum(myRealCalled)
+			if len(calledGeo) != 0 {
+				myCdr.LibPhoneEnrich = calledGeo
+			}
 		}
 	}
 	myRealCalling, myNatOfRealCalling, err := getStandardCallingNumFromCirCdrPack(myCdr.cirCdrPacks[0])
@@ -830,28 +835,31 @@ func (myCdr *CirCdr) EnrichWibLibPhone() error {
 	case "2", "0":
 		{
 			if len(myCdr.LibPhoneEnrich) != 0 {
-				myCdr.LibPhoneEnrich = myCdr.LibPhoneEnrich + ", \"calling_country_code\": \"unknown code\", \"calling_country\": \"ZZ\", \"calling_number_type\": \"unknown type\", \"calling_number_location\": \"unknown location\""
+				myCdr.LibPhoneEnrich = myCdr.LibPhoneEnrich + ",\"calling_country_code\":\"unknown code\",\"calling_country\":\"ZZ\",\"calling_number_type\":\"unknown type\",\"calling_number_location\":\"unknown location\""
 			} else {
-				myCdr.LibPhoneEnrich = "\"calling_country_code\": \"unknown code\", \"calling_country\": \"ZZ\", \"calling_number_type\": \"unknown type\", \"calling_number_location\": \"unknown location\""
+				myCdr.LibPhoneEnrich = "\"calling_country_code\":\"unknown code\",\"calling_country\":\"ZZ\",\"calling_number_type\":\"unknown type\",\"calling_number_location\":\"unknown location\""
 			}
 			return nil
 		}
 	case "115":
 		{
 			if len(myCdr.LibPhoneEnrich) != 0 {
-				myCdr.LibPhoneEnrich = myCdr.LibPhoneEnrich + ", \"calling_country_code\": \"33\", \"calling_country\": \"FR\", \"calling_number_type\": \"short num\", \"calling_number_location\": \"unknown location\""
+				myCdr.LibPhoneEnrich = myCdr.LibPhoneEnrich + ",\"calling_country_code\":\"33\",\"calling_country\":\"FR\",\"calling_number_type\":\"short num\",\"calling_number_location\":\"unknown location\""
 			} else {
-				myCdr.LibPhoneEnrich = "\"calling_country_code\": \"33\", \"calling_country\": \"FR\", \"calling_number_type\": \"short num\", \"calling_number_location\": \"unknown location\""
+				myCdr.LibPhoneEnrich = "\"calling_country_code\":\"33\",\"calling_country\":\"FR\",\"calling_number_type\":\"short num\",\"calling_number_location\":\"unknown location\""
 			}
 			return nil
 		}
 	default:
 		// removing too buggy called number before calling the libphonenumber
 		if !strings.Contains(myRealCalling, "+0") {
-			if len(myCdr.LibPhoneEnrich) != 0 {
-				myCdr.LibPhoneEnrich = myCdr.LibPhoneEnrich + ", " + PstnColumnFromCallingNum(myRealCalling)
+			callingGeo = PstnColumnFromCallingNum(myRealCalling)
+			if len(myCdr.LibPhoneEnrich) != 0 && len(callingGeo) != 0 {
+				myCdr.LibPhoneEnrich = myCdr.LibPhoneEnrich + "," + callingGeo
+			} else if len(callingGeo) != 0 {
+				myCdr.LibPhoneEnrich = callingGeo
 			} else {
-				myCdr.LibPhoneEnrich = PstnColumnFromCallingNum(myRealCalling)
+				myCdr.LibPhoneEnrich = ""
 			}
 		}
 	}
@@ -863,12 +871,12 @@ func (myCdr *CirCdr) EnrichWibLibPhone() error {
 func getStandardCalledNumFromCirCdrPack(myCirCdrPack string) (string, string, error) {
 	if len(myCirCdrPack) == 0 {
 		global.Logger.Warn("Cannot enrich an empty cirpack standard package")
-		return "", "", fmt.Errorf("empty parameter")
+		return "","", fmt.Errorf("empty parameter")
 	}
 	splittedDruidBasicPack, err := convertCirBasicPackToJsonStringSlice(myCirCdrPack)
 	if err != nil {
 		global.Logger.WithError(err).Warn("Unable to convert CDR std pack to json slice")
-		return "", "", err
+		return "","", err
 	}
 	return getStandardNumFromRawNumber(splittedDruidBasicPack[JsonBpckNatRealCalledNum],
 		splittedDruidBasicPack[JsonBpckRealCalledNum])
@@ -878,12 +886,12 @@ func getStandardCalledNumFromCirCdrPack(myCirCdrPack string) (string, string, er
 func getStandardCallingNumFromCirCdrPack(myCirCdrPack string) (string, string, error) {
 	if len(myCirCdrPack) == 0 {
 		global.Logger.Warn("Cannot enrich an empty cirpack standard package")
-		return "", "", fmt.Errorf("empty parameter")
+		return "","", fmt.Errorf("empty parameter")
 	}
 	splittedDruidBasicPack, err := convertCirBasicPackToJsonStringSlice(myCirCdrPack)
 	if err != nil {
 		global.Logger.WithError(err).Warn("Unable to convert CDR std pack to json slice")
-		return "", "", err
+		return "","", err
 	}
 	return getStandardNumFromRawNumber(splittedDruidBasicPack[JsonBpckNatCallingNum],
 		splittedDruidBasicPack[JsonBpckCallingNum])
