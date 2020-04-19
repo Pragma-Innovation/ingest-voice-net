@@ -2,11 +2,9 @@ package cdrtools
 
 import (
 	"bufio"
-	"bytes"
-	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"github.com/Pragma-Innovation/ingest-voice-net/global"
-	"github.com/Shopify/sarama"
 	"github.com/sirupsen/logrus"
 	"os"
 	"reflect"
@@ -15,328 +13,590 @@ import (
 	"time"
 )
 
-// data structure for cirPack CDR (that embedded CDR's packages)
-// this data structure is used to store CDR data once de serialized
+// Data structure for handling Cirpack CDR
+// concept of Blocks has been introduced to manage the first step where we
+// deserialize pieces (blocks) of the CDR without getting into packages fields
 
-type CirCdr struct {
-	ackCounter     int
-	AppFlag        string `"app_flag"`
-	IngestTime     string `"ingest_time"`
-	length         int
-	amountPack     int
-	cirCdrPacks    []string
-	JsonEncoded    string
-	LibPhoneEnrich string
+type PackageBlock struct {
+	Type    string
+	Length  int
+	Payload string
 }
 
-const (
-	CirCdrAckCounterOffset = 3
-	CirCdrAppFlagOffset    = 8
-	CirCdrDollarOffset     = 10
-)
-
-// data structure for cirpack CDR Packages
-// we declare all column of CDR and associate it to its position in CDR
-
-// structures, variable and mapping for basic package
-
-// Cirpack format
-
-type cirBasicPackCol int
-
-const (
-	CirBpckTLen = iota
-	CirBpckAccount
-	CirBpckDirection
-	CirBpckCallStDate
-	CirBpckCallStTime
-	CirBpckConnDur
-	CirBpckConnDurRg
-	CirBpckTotDur
-	CirBpckSwitchIp
-	CirBpckAccessCode
-	CirBpckTypeCallingPtAccess
-	CirBpckNumPlCallingPtNum
-	CirBpckCallingPtCat
-	CirBpckNatCallingNum
-	CirBpckCallingNum
-	CirBpckNatAddCallingPtAdd
-	CirBpckAddCallingPtAdd
-	CirBpckAccTypeCalledNum
-	CirBpckNumPlCalledPt
-	CirBpckNatCalledNum
-	CirBpckCalledNum
-	CirBpckCatRealCalledNum
-	CirBpckTypeRealCalledNum
-	CirBpckNatRealCalledNum
-	CirBpckRealCalledNum
-	CirBpckBillingMode
-	CirBpckServiceCode
-	CirBpckReleaseLoc
-	CirBpckOperatorId
-	CirBpckCircuitId
-	CirBpckInTrunkGroup
-	CirBpckOutTrunkGroup
-)
-
-var cirBasicPackColNameMap = map[cirBasicPackCol]string{
-	CirBpckTLen:                "type_length",
-	CirBpckAccount:             "account",
-	CirBpckDirection:           "direction",
-	CirBpckCallStDate:          "call_start_date",
-	CirBpckCallStTime:          "call_start_time",
-	CirBpckConnDur:             "connection_duration",
-	CirBpckConnDurRg:           "connection_ringing_duration",
-	CirBpckTotDur:              "total_call_duration",
-	CirBpckSwitchIp:            "switch_ip",
-	CirBpckAccessCode:          "access_code",
-	CirBpckTypeCallingPtAccess: "type_calling_party_access",
-	CirBpckNumPlCallingPtNum:   "numbering_plan_calling_party_number",
-	CirBpckCallingPtCat:        "calling_party_category",
-	CirBpckNatCallingNum:       "nature_calling_number",
-	CirBpckCallingNum:          "calling_number",
-	CirBpckNatAddCallingPtAdd:  "nature_additional_calling_party_address",
-	CirBpckAddCallingPtAdd:     "additional_calling_party_address",
-	CirBpckAccTypeCalledNum:    "access_type_called_number",
-	CirBpckNumPlCalledPt:       "number_plan_called_party",
-	CirBpckNatCalledNum:        "nature_called_number",
-	CirBpckCalledNum:           "called_number",
-	CirBpckCatRealCalledNum:    "category_real_called_number",
-	CirBpckTypeRealCalledNum:   "type_real_called_number",
-	CirBpckNatRealCalledNum:    "nature_real_called_number",
-	CirBpckRealCalledNum:       "real_called_number",
-	CirBpckBillingMode:         "billing_mode",
-	CirBpckServiceCode:         "service_code",
-	CirBpckReleaseLoc:          "release_loc_cause",
-	CirBpckOperatorId:          "operator_id",
-	CirBpckCircuitId:           "circuit_id",
-	CirBpckInTrunkGroup:        "in_trunk_group",
-	CirBpckOutTrunkGroup:       "out_trunk_group",
+type CirpackCdrBlocks struct {
+	IngestTime  int64
+	Header      string
+	Length      int
+	PackagesQty int
+	Packages    []*PackageBlock
 }
 
-// basic package JSON format
+// CDR fully structured
 
-type jsonBasicPackCol int
+// Header
 
-const (
-	JsonBpckAccount jsonBasicPackCol = iota
-	JsonBpckDirection
-	JsonBpckCallStartDate
-	JsonBpckCallStartHour
-	JsonBpckCallStartMinsec
-	JsonBpckConnDur
-	JsonBpckConnDurRg
-	JsonBpckTotDur
-	JsonBpckSwitchIp
-	JsonBpckAccessCode
-	JsonBpckTypeCallingPtAccess
-	JsonBpckNumPlCallingPtNum
-	JsonBpckCallingPtCat
-	JsonBpckNatCallingNum
-	JsonBpckCallingNum
-	JsonBpckNatAddCallingPtAdd
-	JsonBpckAddCallingPtAdd
-	JsonBpckAccTypeCalledNum
-	JsonBpckNumPlCalledPt
-	JsonBpckNatCalledNum
-	JsonBpckCalledNum
-	JsonBpckCatRealCalledNum
-	JsonBpckTypeRealCalledNum
-	JsonBpckNatRealCalledNum
-	JsonBpckRealCalledNum
-	JsonBpckBillingMode
-	JsonBpckServiceCode
-	JsonBpckReleaseLoc
-	JsonBpckOperatorId
-	JsonBpckCircuitId
-	JsonBpckInTrunkGroup
-	JsonBpckOutTrunkGroup
-)
-
-var jsonBasicPackColNameMap = map[jsonBasicPackCol]string{
-	JsonBpckAccount:             "account",
-	JsonBpckDirection:           "direction",
-	JsonBpckCallStartDate:       "call_start_date",
-	JsonBpckCallStartHour:       "call_start_hour",
-	JsonBpckCallStartMinsec:     "call_start_minsec",
-	JsonBpckConnDur:             "connection_duration",
-	JsonBpckConnDurRg:           "connnection_ringing_duration",
-	JsonBpckTotDur:              "total_duration",
-	JsonBpckSwitchIp:            "switch_ip",
-	JsonBpckAccessCode:          "access_code",
-	JsonBpckTypeCallingPtAccess: "type_calling_party_access",
-	JsonBpckNumPlCallingPtNum:   "numbering_plan_calling_party_number",
-	JsonBpckCallingPtCat:        "calling_party_category",
-	JsonBpckNatCallingNum:       "nature_calling_number",
-	JsonBpckCallingNum:          "calling_number",
-	JsonBpckNatAddCallingPtAdd:  "nature_additional_calling_party_address",
-	JsonBpckAddCallingPtAdd:     "additional_calling_party_address",
-	JsonBpckAccTypeCalledNum:    "access_type_called_number",
-	JsonBpckNumPlCalledPt:       "number_plan_called_party",
-	JsonBpckNatCalledNum:        "nature_called_number",
-	JsonBpckCalledNum:           "called_num",
-	JsonBpckCatRealCalledNum:    "category_real_called_number",
-	JsonBpckTypeRealCalledNum:   "type_real_called_number",
-	JsonBpckNatRealCalledNum:    "nat_real_called",
-	JsonBpckRealCalledNum:       "real_called_number",
-	JsonBpckBillingMode:         "billing_mode",
-	JsonBpckServiceCode:         "service_code",
-	JsonBpckReleaseLoc:          "release_loc_cause",
-	JsonBpckOperatorId:          "operator_id",
-	JsonBpckCircuitId:           "circuit_id",
-	JsonBpckInTrunkGroup:        "in_trunk_group",
-	JsonBpckOutTrunkGroup:       "out_trunk_group",
+type CirpackHeader struct {
+	AppFlag string `json:"app_flag"`
+	Length  int    `json:"length"`
 }
 
-// mapping table between cirpack standardized CDR and JSON/Druid CDR
+// Interface that group together all optional packages having the same methods
 
-var cirBasicPackColMapJsonBasicPackCol = map[cirBasicPackCol]jsonBasicPackCol{
-	CirBpckAccount:             JsonBpckAccount,
-	CirBpckDirection:           JsonBpckDirection,
-	CirBpckConnDur:             JsonBpckConnDur,
-	CirBpckConnDurRg:           JsonBpckConnDurRg,
-	CirBpckTotDur:              JsonBpckTotDur,
-	CirBpckAccessCode:          JsonBpckAccessCode,
-	CirBpckTypeCallingPtAccess: JsonBpckTypeCallingPtAccess,
-	CirBpckNumPlCallingPtNum:   JsonBpckNumPlCallingPtNum,
-	CirBpckCallingPtCat:        JsonBpckCallingPtCat,
-	CirBpckNatCallingNum:       JsonBpckNatCallingNum,
-	CirBpckCallingNum:          JsonBpckCallingNum,
-	CirBpckNatAddCallingPtAdd:  JsonBpckNatAddCallingPtAdd,
-	CirBpckAddCallingPtAdd:     JsonBpckAddCallingPtAdd,
-	CirBpckAccTypeCalledNum:    JsonBpckAccTypeCalledNum,
-	CirBpckNumPlCalledPt:       JsonBpckNumPlCalledPt,
-	CirBpckNatCalledNum:        JsonBpckNatCalledNum,
-	CirBpckCalledNum:           JsonBpckCalledNum,
-	CirBpckCatRealCalledNum:    JsonBpckCatRealCalledNum,
-	CirBpckTypeRealCalledNum:   JsonBpckTypeRealCalledNum,
-	CirBpckNatRealCalledNum:    JsonBpckNatRealCalledNum,
-	CirBpckRealCalledNum:       JsonBpckRealCalledNum,
-	CirBpckBillingMode:         JsonBpckBillingMode,
-	CirBpckServiceCode:         JsonBpckServiceCode,
-	CirBpckReleaseLoc:          JsonBpckReleaseLoc,
-	CirBpckOperatorId:          JsonBpckOperatorId,
-	CirBpckCircuitId:           JsonBpckCircuitId,
-	CirBpckInTrunkGroup:        JsonBpckInTrunkGroup,
-	CirBpckOutTrunkGroup:       JsonBpckOutTrunkGroup,
+type CirpackPackage interface {
+	FulfilCdrTsJson(cdrTsModel *CirpackCdrJsonTimeSeries) error
+	LoadCdrFieldsFromBlockPayload(payload string) error
 }
 
-// column of RTP CDR cirpack package
-
-type cirRtpPackCol int
-
-const (
-	CirRtpPackTypeLen = iota
-	CirRtpPackDuration
-	CirRtpPackBSent
-	CirRtpPackBReceived
-	CirRtpPackPckSent
-	CirRtpPackPckReceived
-	CirRtpPackPckLost
-	CirRtpPackAvgJitter
-	CirRtpPackAvgTransDelay
-	CirRtpPackAddiInfo
-	CirRtpPackIpAAndPort
-)
-
-// column of RTP CDR json package
-
-type jsonRtpPackCol int
-
-const (
-	JsonRtpPackDuration = iota
-	JsonRtpPackBSent
-	JsonRtpPackBReceived
-	JsonRtpPackPckSent
-	JsonRtpPackPckReceived
-	JsonRtpPackPckLost
-	JsonRtpPackAvgJitter
-	JsonRtpPackAvgTransDelay
-	JsonRtpPackAddiInfo
-	JsonRtpPackIp
-	JsonRtpPackPort
-)
-
-var jsonRtpPackColNameMap = map[jsonRtpPackCol]string{
-	JsonRtpPackDuration:      "rtp_duration",
-	JsonRtpPackBSent:         "rtp_bytes_sent",
-	JsonRtpPackBReceived:     "rtp_bytes_received",
-	JsonRtpPackPckSent:       "rtp_pck_sent",
-	JsonRtpPackPckReceived:   "rtp_pck_received",
-	JsonRtpPackPckLost:       "rtp_pck_lost",
-	JsonRtpPackAvgJitter:     "rtp_avg_jitter",
-	JsonRtpPackAvgTransDelay: "rtp_avg_trans_delay",
-	JsonRtpPackAddiInfo:      "rtp_addi_info",
-	JsonRtpPackIp:            "rtp_ip",
-	JsonRtpPackPort:          "rtp_port",
+type CirpackCdr struct {
+	IngestTime int64
+	Header     CirpackHeader
+	Packages   []CirpackPackage
 }
 
-var cirRtpPackColMapJsonRtpPackCol = map[cirRtpPackCol]jsonRtpPackCol{
-	CirRtpPackDuration:      JsonRtpPackDuration,
-	CirRtpPackBSent:         JsonRtpPackBSent,
-	CirRtpPackBReceived:     JsonRtpPackBReceived,
-	CirRtpPackPckSent:       JsonRtpPackPckSent,
-	CirRtpPackPckReceived:   JsonRtpPackPckReceived,
-	CirRtpPackPckLost:       JsonRtpPackPckLost,
-	CirRtpPackAvgJitter:     JsonRtpPackAvgJitter,
-	CirRtpPackAvgTransDelay: JsonRtpPackAvgTransDelay,
-	CirRtpPackAddiInfo:      JsonRtpPackAddiInfo,
+type CirpackUndefinedPackage struct{}
+
+type CirpackBasicPackage struct {
+	Account                             string `json:"account"`
+	Direction                           string `json:"direction"`
+	CallStartDate                       string `json:"call_start_date"`
+	CallStartTime                       string `json:"call_start_time"`
+	ConnectionDuration                  uint   `json:"connection_duration"`
+	ConnectionRingingDuration           uint   `json:"connnection_ringing_duration"`
+	TotalDuration                       uint   `json:"total_duration"`
+	SwitchIp                            string `json:"switch_ip"`
+	AccessCode                          string `json:"access_code"`
+	TypeCallingPartyAccess              string `json:"type_calling_party_access"`
+	NumberPlanCallingPartyNumber        string `json:"numbering_plan_calling_party_number"`
+	CallingPartyCategory                string `json:"calling_party_category"`
+	NatureCallingNumber                 string `json:"nature_calling_number"`
+	CallingNumber                       string `json:"calling_number"`
+	NatureAdditionalCallingPartyAddress string `json:"nature_additional_calling_party_address"`
+	AdditionalCallingPartyAddress       string `json:"additional_calling_party_address"`
+	AccessTypeCalledNumber              string `json:"access_type_called_number"`
+	NumberPlanCalledParty               string `json:"number_plan_called_party"`
+	NatureCalledNumber                  string `json:"nature_called_number"`
+	CalledNum                           string `json:"called_num"`
+	CategoryRealCalledNumber            string `json:"category_real_called_number"`
+	TypeRealCalledNumber                string `json:"type_real_called_number"`
+	NatRealCalled                       string `json:"nat_real_called"`
+	RealCalledNumber                    string `json:"real_called_number"`
+	BillingMode                         string `json:"billing_mode"`
+	ServiceCode                         string `json:"service_code"`
+	ReleaseLocCause                     string `json:"release_loc_cause"`
+	OperatorId                          string `json:"operator_id"`
+	CircuitId                           string `json:"circuit_id"`
+	InTrunkGroup                        string `json:"in_trunk_group"`
+	OutTrunkGroup                       string `json:"out_trunk_group"`
+	Units                               uint   `json:"charge_units"`
 }
 
-func ConvertCirCdrFileToDruidCdrFile(myCdrFile string, myOutPutFile *os.File) (int, error) {
-	// open a file
-	var writtenBytes int = 0
-	var errWt error
-	if myCdrFileDesc, err := os.Open(myCdrFile); err == nil {
-		// make sure it gets closed
-		defer myCdrFileDesc.Close()
+type CirpackRtpPackage struct {
+	RtpDuration       uint   `json:"rtp_duration"`
+	RtpBytesSent      uint   `json:"rtp_bytes_sent"`
+	RtpBytesReceived  uint   `json:"rtp_bytes_received"`
+	RtpPacketSent     uint   `json:"rtp_pck_sent"`
+	RtpPacketReceived uint   `json:"rtp_pck_received"`
+	RtpPacketLost     uint   `json:"rtp_pck_lost"`
+	RtpAvgJitter      uint   `json:"rtp_avg_jitter"`
+	RtpAvgTransDelay  uint   `json:"rtp_avg_trans_delay"`
+	RtpAddiInfo       string `json:"rtp_addi_info"`
+	RtpIpPort         string `json:"rtp_ip_and_port"`
+}
 
-		// create a new scanner and read the file line by line
-		scanner := bufio.NewScanner(myCdrFileDesc)
-		for scanner.Scan() {
-			err, jsonCdrBytes := convertStringCdrToStreamCdr(scanner.Text())
-			if err != nil {
-				global.Logger.WithError(err).Warn("unable to convert a string cdr to a byte stream")
-			}
-			fileTime, err := convertCdrFileNameToTimeStamp(myCdrFile)
-			if err != nil {
-				return -1, fmt.Errorf("unbale to convert cdr file name to timestamp")
-			}
-			err, jsonCdrs := DeserializerCirCdr(jsonCdrBytes, fileTime)
-			for _, jsonCdr := range jsonCdrs {
-				// jsonCdr.CdrPrint()
-				err := jsonCdr.EnrichWibLibPhone()
-				if err != nil {
-					global.Logger.WithError(err).Warn("Unable to enrich cdr")
-				}
-				err = jsonCdr.JsonEncode()
-				if err != nil {
-					global.Logger.WithFields(logrus.Fields{
-						"buggy cdr": jsonCdr,
-					}).Warn("Unable to json marshal CDR")
-				}
-				writtenBytes, errWt = myOutPutFile.WriteString(jsonCdr.JsonEncoded)
-				if errWt != nil {
-					return 0, errWt
-				}
-			}
+// Tools used for decoding
 
+// Convert a string that gives a length in hexadecimal into an int
+
+func convertHexaLentghStrToInt(hexaStr string) (int, error) {
+	tempoLen, err := strconv.ParseInt(hexaStr, 16, 32)
+	if err != nil {
+		global.Logger.WithError(err).Warn("conversion issue")
+		return -1, fmt.Errorf("issue while converting hexa string to int")
+	}
+	return int(tempoLen), nil
+}
+
+// Read CDR package from a string that contains remaining data that is still unread
+// return package type (string), package length (int), payload (string), remaining data (string, error if any
+
+func readCirpackPackage(remainingData string) (string, int, string, string, error) {
+	var packageType, packagePayload, remainingString string
+	var packageLen int
+	if len(remainingData) == 0 {
+		err := fmt.Errorf("trying to read an empty string as package")
+		return "", -1, "", "", err
+	}
+	packageType = remainingData[0:1]
+	packLenStrStart := remainingData[1:]
+	spaceIndex := strings.Index(packLenStrStart, " ")
+	packLenStr := packLenStrStart[0:spaceIndex]
+	var err error
+	packageLen, err = convertHexaLentghStrToInt(packLenStr)
+	if err != nil {
+		err := fmt.Errorf("issue while decoding header cdr length")
+		return "", -1, "", "", err
+	}
+	// we add 1 to skip space character
+	packPayloadStart := packLenStrStart[spaceIndex+1:]
+	// len + 1 as payload length include separator space character
+	if len(packPayloadStart)+1 < packageLen {
+		err := fmt.Errorf("package is probably trunkated or malformed")
+		return "", -1, "", "", err
+	}
+	// packageLen -1 as we already removed the space separator between package header and payload
+	packagePayload = packPayloadStart[:packageLen-1]
+	if packageLen == len(packPayloadStart)+1 {
+		remainingString = ""
+	} else {
+		remainingString = packPayloadStart[packageLen:]
+	}
+	return packageType, packageLen, packagePayload, remainingString, nil
+}
+
+func splitCdrHeader(header string) []string {
+	if strings.Contains(header, "$") {
+		// CDR case
+		return strings.Split(header, "$")
+	} else if strings.Contains(header, "@") {
+		// iCDR case
+		return strings.Split(header, "@")
+	} else {
+		global.Logger.WithFields(logrus.Fields{
+			"header": header,
+		}).Warn("invalid header")
+		return []string{}
+	}
+}
+
+// Methods of CirpackCdrBlocks
+// All read methods return remaining data (string) to be read and a potential error
+
+func (cdrBlocks *CirpackCdrBlocks) ReadHeaderBlock(cdrString string) (string, error) {
+	headerLen := strings.IndexRune(cdrString, ' ')
+	header := cdrString[0:headerLen]
+	headerSlice := splitCdrHeader(header)
+	if len(headerSlice) <= 1 {
+		return "", fmt.Errorf("cdr header badly formatted : wrong header")
+	}
+	lenAsStrHex := headerSlice[1]
+	var err error
+	cdrBlocks.Length, err = convertHexaLentghStrToInt(lenAsStrHex)
+	if err != nil {
+		global.Logger.WithError(err).Warn("issue while decoding header cdr length")
+		return "", err
+	}
+	cdrBlocks.Header = header
+	return cdrString[7:], nil
+}
+
+func (cdrBlocks *CirpackCdrBlocks) ReadPackagesBlocks(cdrData string) error {
+	var packType, packPayload string
+	var packLen int
+	var err error
+	remainingData := cdrData
+	for len(remainingData) != 0 {
+		packType, packLen, packPayload, remainingData, err =
+			readCirpackPackage(remainingData)
+		if err != nil {
+			global.Logger.WithFields(logrus.Fields{
+				"data": remainingData,
+			}).Debug("issue while reading optional package block")
+			return err
 		}
-		// check for errors
+		cdrBlocks.Packages =
+			append(cdrBlocks.Packages, &PackageBlock{
+				Type:    packType,
+				Length:  packLen,
+				Payload: packPayload,
+			})
+		cdrBlocks.PackagesQty += 1
+	}
+	return nil
+}
+
+func newCirpackCdrBlocks() *CirpackCdrBlocks {
+	return &CirpackCdrBlocks{}
+}
+
+func (cdrBlocks *CirpackCdrBlocks) SetIngestTimeNow() {
+	cdrBlocks.IngestTime = time.Now().Unix()
+}
+
+func (cdrBlocks *CirpackCdrBlocks) ReadBlocksFromStringCdr(cdrString string) error {
+	cdrBlocks.SetIngestTimeNow()
+	remainingSting, err := cdrBlocks.ReadHeaderBlock(cdrString)
+	if err != nil {
+		global.Logger.WithError(err).Warn("unable to read header block from CDR")
+		global.Logger.WithFields(logrus.Fields{
+			"data": cdrString,
+		}).Debug("CDR data")
+		return err
+	}
+	err = cdrBlocks.ReadPackagesBlocks(remainingSting)
+	if err != nil {
+		global.Logger.WithError(err).Warn("unable to read optional packages blocks from CDR")
+		global.Logger.WithFields(logrus.Fields{
+			"data":      cdrString,
+			"remaining": remainingSting,
+		}).Debug("CDR data")
+		return err
+	}
+	return nil
+}
+
+func (cdrBlocks *CirpackCdrBlocks) deserializeCirpackCdrBlocks(cdrString string) *CirpackCdrBlocks {
+	err := cdrBlocks.ReadBlocksFromStringCdr(cdrString)
+	if err != nil {
+		global.Logger.WithError(err).Warn("unable to read blocks from CDR")
+		cdrBlocks = nil // garbage
+		return nil
+	}
+	return cdrBlocks
+}
+
+// end of CirpackCdrBlocks methods
+
+// tools to deserialize cirpack CDR blocks payload into cirpack CDR struct fields
+
+func loadCdrPayloadToPackageStruct(pack interface{}, payload string) error {
+	fields := strings.Split(payload, " ")
+	if len(fields) <= 1 {
+		err := fmt.Errorf("unable to load an empty payload")
+		return err
+	}
+	// let's check that the struct can receive
+	// payload fields
+	s := reflect.ValueOf(pack).Elem()
+	if len(fields) != s.NumField() {
+		err := fmt.Errorf("struct and payload don't have the same amount of fields")
+		return err
+	}
+	for i := 0; i < s.NumField(); i++ {
+		f := s.Field(i)
+		switch f.Type().String() {
+		case "string":
+			{
+				f.SetString(fields[i])
+			}
+		case "int", "int64":
+			{
+				if myInt, err := strconv.ParseInt(fields[i], 10, 64); err == nil {
+					f.SetInt(myInt)
+				}
+			}
+		case "uint":
+			{
+				if myUInt, err := strconv.ParseUint(fields[i], 10, 64); err == nil {
+					f.SetUint(myUInt)
+				}
+			}
+		default:
+			{
+				global.Logger.Warn("unmanaged type during load of payload")
+			}
+		}
+	}
+	return nil
+}
+
+// tool to copy all fields from a source structure to a destination structure sharing the same json tag
+
+func CopySameTaggedField(source interface{}, destination interface{}) error {
+	src := reflect.ValueOf(source).Elem()
+	if !src.CanAddr() {
+		return fmt.Errorf("cannot assign to source, source must be a pointer in order to assign")
+	}
+	dst := reflect.ValueOf(destination).Elem()
+	if !dst.CanAddr() {
+		return fmt.Errorf("cannot assign to destination, destination must be a pointer in order to assign")
+	}
+	// It's possible we can cache this, which is why precompute all these ahead of time.
+	findJsonName := func(t reflect.StructTag) (string, error) {
+		if jt, ok := t.Lookup("json"); ok {
+			return strings.Split(jt, ",")[0], nil
+		}
+		return "", fmt.Errorf("tag provided does not define a json tag")
+	}
+
+	destinationFieldNames := map[string]int{}
+	for i := 0; i < dst.NumField(); i++ {
+		typeField := dst.Type().Field(i)
+		tag := typeField.Tag
+		jname, _ := findJsonName(tag)
+		destinationFieldNames[jname] = i
+	}
+
+	//sourceFieldNames := map[string]int{}
+	for i := 0; i < src.NumField(); i++ {
+		typeField := src.Type().Field(i)
+		tag := typeField.Tag
+		jname, _ := findJsonName(tag)
+		fieldDstNum, ok := destinationFieldNames[jname]
+		if !ok {
+			global.Logger.WithField("json tag", jname).Debug("json tag does not exit in dst struct")
+		} else {
+			destField := dst.Field(fieldDstNum)
+			srcField := src.Field(i)
+			destField.Set(srcField)
+		}
+	}
+	return nil
+}
+
+// Methods of Cirpack packages (must comply to CirpackPackage interface)
+// Basic package
+
+func (basicPack *CirpackBasicPackage) LoadCdrFieldsFromBlockPayload(payload string) error {
+	err := loadCdrPayloadToPackageStruct(basicPack, payload)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (basicPack *CirpackBasicPackage) FulfilCdrTsJsonWithCustomFields(cdrTsModel *CirpackCdrJsonTimeSeries) error {
+	// let's deal with 	CallStartDate, CallStartTime
+	dateTimeStr := basicPack.CallStartDate[0:4] + "-" + basicPack.CallStartDate[4:6] +
+		"-" + basicPack.CallStartDate[6:8]
+	dateTimeStr = dateTimeStr + "T" + basicPack.CallStartTime[0:2] + ":" + basicPack.CallStartTime[2:4] +
+		":" + basicPack.CallStartTime[4:6] + "Z"
+	t, err := time.Parse(time.RFC3339, dateTimeStr)
+	if err != nil {
+		global.Logger.WithError(err).Warn("unable to parse cdr date and time")
+		return err
+	}
+	cdrTsModel.CallStartDateTime = t.Unix()
+	return nil
+}
+
+func (basicPack *CirpackBasicPackage) FulfilCdrTsJson(cdrTsModel *CirpackCdrJsonTimeSeries) error {
+	err := CopySameTaggedField(basicPack, cdrTsModel)
+	if err != nil {
+		global.Logger.WithError(err).Warn("unable to copy basic package to ts model")
+	}
+	err = basicPack.FulfilCdrTsJsonWithCustomFields(cdrTsModel)
+	if err != nil {
+		global.Logger.WithError(err).Warn("unable to copy basic package custom fields to ts model")
+	}
+	return nil
+}
+
+
+
+// RTP package
+
+func (rtpPack *CirpackRtpPackage) LoadCdrFieldsFromBlockPayload(payload string) error {
+	err := loadCdrPayloadToPackageStruct(rtpPack, payload)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+
+func (rtpPack *CirpackRtpPackage) FulfilCdrTsJsonWithCustomFields(cdrTsModel *CirpackCdrJsonTimeSeries) error {
+	// let's deal with ip and port field
+	fields := strings.Split(rtpPack.RtpIpPort, ":")
+	if len(fields) != 2 {
+		global.Logger.Warn("error in rtp package ip and port field")
+	}
+	cdrTsModel.RtpIp = fields[0]
+	cdrTsModel.RtpPort = fields[1]
+	return nil
+}
+
+func (rtpPack *CirpackRtpPackage) FulfilCdrTsJson(cdrTsModel *CirpackCdrJsonTimeSeries) error {
+	err := CopySameTaggedField(rtpPack, cdrTsModel)
+	if err != nil {
+		global.Logger.WithError(err).Warn("unable to copy basic package")
+	}
+	err = rtpPack.FulfilCdrTsJsonWithCustomFields(cdrTsModel)
+	if err != nil {
+		global.Logger.WithError(err).Warn("unable to copy basic package custom fields to ts model")
+	}
+	return nil
+}
+
+
+
+// Undefined package
+
+func (rtpPack *CirpackUndefinedPackage) FulfilCdrTsJson(cdrTsModel *CirpackCdrJsonTimeSeries) error {
+	return fmt.Errorf("cannot fulfil TS with undefined package")
+}
+
+func (rtpPack *CirpackUndefinedPackage) LoadCdrFieldsFromBlockPayload(payload string) error {
+	return fmt.Errorf("undefined block")
+}
+
+// Methods of CirpackCdr struct
+
+func NewCirpackCdr() *CirpackCdr {
+	return &CirpackCdr{}
+}
+
+func (cdr *CirpackCdr) loadCdrIngestTimeFieldsFromBlocks(cdrBlocks *CirpackCdrBlocks) error {
+	cdr.IngestTime = cdrBlocks.IngestTime
+	return nil
+}
+
+func (cdr *CirpackCdr) loadCdrHeaderFieldsFromBlocks(cdrBlocks *CirpackCdrBlocks) error {
+	headerSlice := splitCdrHeader(cdrBlocks.Header)
+	cdr.Header.AppFlag = headerSlice[0]
+	cdr.Header.Length = cdrBlocks.Length
+	return nil
+}
+
+func (cdr *CirpackCdr) loadCdrPackagesFromBlocks(cdrBlocks *CirpackCdrBlocks) error {
+	for _, packBlock := range cdrBlocks.Packages {
+		switch packBlock.Type {
+		case "T":
+			{
+				newPack := new(CirpackBasicPackage)
+				err := newPack.LoadCdrFieldsFromBlockPayload(packBlock.Payload)
+				if err != nil {
+					global.Logger.WithError(err).Warn("issue while loading cdr fields from std block")
+					return err
+				}
+				cdr.Packages = append(cdr.Packages, newPack)
+			}
+		case "O":
+			{
+				newPack := new(CirpackRtpPackage)
+				err := newPack.LoadCdrFieldsFromBlockPayload(packBlock.Payload)
+				if err != nil {
+					global.Logger.WithError(err).Warn("issue while loading cdr fields from rtp block")
+					return err
+				}
+				cdr.Packages = append(cdr.Packages, newPack)
+			}
+		default:
+			{
+				global.Logger.Debug("skipping undefined package")
+			}
+		}
+	}
+	return nil
+}
+
+func (cdr *CirpackCdr) loadCdrFromBlocks(cdrBlocks *CirpackCdrBlocks) error {
+	err := cdr.loadCdrIngestTimeFieldsFromBlocks(cdrBlocks)
+	if err != nil {
+		global.Logger.WithError(err).Warn("unable to load cdr ingest time from block ingest time")
+		return err
+	}
+	err = cdr.loadCdrHeaderFieldsFromBlocks(cdrBlocks)
+	if err != nil {
+		global.Logger.WithError(err).Warn("unable to load cdr header from block header")
+		return err
+	}
+	err = cdr.loadCdrPackagesFromBlocks(cdrBlocks)
+	if err != nil {
+		global.Logger.WithError(err).Warn("unable to load cdr fields from package blocks")
+		return err
+	}
+	return nil
+}
+
+func (cdr *CirpackCdr) loadCdrFieldsFromCdrPayload(payload string) error {
+	cdrBlocks := newCirpackCdrBlocks()
+	cdrBlocks.deserializeCirpackCdrBlocks(payload)
+	if cdrBlocks == nil {
+		err := fmt.Errorf("unable to deserialize cirpack cdr blocks")
+		return err
+	}
+	err := cdr.loadCdrFromBlocks(cdrBlocks)
+	if err != nil {
+		global.Logger.WithError(err).Warn("unable to load blocks to cdr")
+		return err
+	}
+	return nil
+}
+
+// exported functions used by other packages
+
+// function taking a CDR input as a string of raw data, deserialize this raw data as one CDR,
+// convert it into time series CDR, marshal this TS struct into JSON and return it as a string
+// it also returns potential errors during processing
+
+func ConvertCirpackCdrFromRawStringToJsonString(cdrData string) (string, error) {
+	var result string
+	cirpackCdr := NewCirpackCdr()
+	err := cirpackCdr.loadCdrFieldsFromCdrPayload(cdrData)
+	if err != nil {
+		global.Logger.Warn("unable load cdr fields from raw cdr data")
+		return "", err
+	}
+	cdrTs := NewCirpackCdrJsonTimeSeries()
+	err = cdrTs.LoadData(cirpackCdr)
+	if err != nil {
+		global.Logger.WithError(err).Warn("unable to load time series cdr model")
+	} else {
+		err := cdrTs.EnrichData()
+		if err != nil {
+			global.Logger.Warn("unable to enrich cdr")
+		}
+		jsonOutput, err := json.Marshal(cdrTs)
+		if err != nil {
+			global.Logger.Warn("unable to marshal cdr time series model")
+		} else {
+			result = string(jsonOutput) + "\n"
+		}
+	}
+	return result, nil
+}
+
+
+func ConvertCirpackCdrsFromFileToJsonStringSlice(cdrFile string) ([]string, error) {
+	var returnedSlice []string
+	if cdrFileDesc, err := os.Open(cdrFile); err == nil {
+		defer cdrFileDesc.Close()
+		// create a new scanner and read the file line by line
+		scanner := bufio.NewScanner(cdrFileDesc)
+		for scanner.Scan() {
+			cdrJsonString, err := ConvertCirpackCdrFromRawStringToJsonString(scanner.Text())
+			if err != nil {
+				global.Logger.WithError(err).Warn("unable to convert it JSON a raw cdr")
+			} else {
+				returnedSlice = append(returnedSlice, cdrJsonString)
+			}
+		}
 		if err = scanner.Err(); err != nil {
 			global.Logger.WithError(err).Fatal("unable to scan cdr files line by line")
 		}
 
 	} else {
-		global.Logger.WithError(err).Fatal("Unable to open JSON cdr file")
+		global.Logger.WithError(err).Fatal("Unable to open cdr file")
+	}
+	return returnedSlice, nil
+}
+
+// function opening a file of CDR's, deserialize all CDR, convert it into time series CDR
+// and write the result into a file descriptor. Is used for batch mode of main program
+// Returns amount of bytes written and potential error during processing
+
+func ConvertCirpackCdrsToJsonFromFileToFileDescriptor(cdrFile string, myOutPutFile *os.File) (int, error) {
+	var writtenBytes int = 0
+	var writeErr error
+	returnedSlice, err := ConvertCirpackCdrsFromFileToJsonStringSlice(cdrFile)
+	if err != nil {
+		global.Logger.WithError(err).Warn("unable to convert cdr file to slice")
+	}
+	for _, cdrJsonStr := range returnedSlice {
+		writtenBytes, writeErr = myOutPutFile.WriteString(cdrJsonStr)
+		if writeErr != nil {
+			global.Logger.WithError(err).Warn("io error with file descriptor")
+			return 0, writeErr
+		}
 	}
 	return writtenBytes, nil
 }
 
+
 // This function is reading the content of a CDR folder (produce by cirpack cdr tool)
-// Read CDR files and return a CirCdr slice (structured CDR)
-func ConvertCdrFolderToCdrs(myCdrDirInput string, purgeCdrFiles bool) ([]CirCdr, error) {
-	var returnCdrs []CirCdr
+// Read CDR files and return a slice of strings (JSON CDR time series model)
+func ConvertCdrFolderToCdrs(myCdrDirInput string, purgeCdrFiles bool) ([]string, error) {
+	var returnCdrs []string
 
 	myCdrFiles, err := global.ReadCdrFolder(myCdrDirInput)
 	if err != nil {
@@ -347,33 +607,11 @@ func ConvertCdrFolderToCdrs(myCdrDirInput string, purgeCdrFiles bool) ([]CirCdr,
 		return nil, nil
 	}
 	for _, cdrFile := range myCdrFiles {
-		fmt.Printf("test file: %s\n", cdrFile)
-	}
-	for _, cdrFile := range myCdrFiles {
-		if myCdrFileDesc, err := os.Open(cdrFile); err == nil {
-			// make sure it gets closed
-			defer myCdrFileDesc.Close()
-
-			// create a new scanner and read the file line by line
-			scanner := bufio.NewScanner(myCdrFileDesc)
-			for scanner.Scan() {
-				err, jsonCdrBytes := convertStringCdrToStreamCdr(scanner.Text())
-				if err != nil {
-					global.Logger.WithError(err).Warn("Unable to convert a string cdr to a byte stream")
-				}
-				fileTime, err := convertCdrFileNameToTimeStamp(cdrFile)
-				if err != nil {
-					return nil, fmt.Errorf("unbale to convert cdr file name to timestamp")
-				}
-				err, jsonCdrs := DeserializerCirCdr(jsonCdrBytes, fileTime)
-				// Let's put together all cdr's into the same slice
-				returnCdrs = append(returnCdrs, jsonCdrs...)
-
-				if err = scanner.Err(); err != nil {
-					global.Logger.WithError(err).Fatal("unable to scan cdr files line by line")
-				}
-			}
+		cdrsSlice, err := ConvertCirpackCdrsFromFileToJsonStringSlice(cdrFile)
+		if err != nil {
+			global.Logger.WithError(err).Warn("unable to convert cdr file into slice of JSON CDR")
 		}
+		returnCdrs = append(returnCdrs, cdrsSlice...)
 	}
 	global.Logger.WithFields(logrus.Fields{
 		"cdr files": len(myCdrFiles),
@@ -383,560 +621,4 @@ func ConvertCdrFolderToCdrs(myCdrDirInput string, purgeCdrFiles bool) ([]CirCdr,
 		global.PurgeCdrFiles(myCdrFiles)
 	}
 	return returnCdrs, nil
-}
-
-// Function summary: take a cirpack CDR string as input and return a slide of
-// strings that match the JSON cdr format
-func convertCirBasicPackToJsonStringSlice(myCirBasicPack string) ([]string, error) {
-	var splittedDruidBasicPack []string
-	splittedCirBasicPack := strings.Split(myCirBasicPack, " ")
-	// we allocate a slice of the size of the json pack mapping table (table of keys)
-	splittedDruidBasicPack = make([]string, len(jsonBasicPackColNameMap))
-	// Let's copy fields for which we have a 1 to 1 binding with cirpack package
-	for index := 0; index < len(splittedCirBasicPack); index++ {
-		// we check if we have a mapping between cirpack column and CDR json Keys
-		if _, isPresent := cirBasicPackColMapJsonBasicPackCol[cirBasicPackCol(index)]; isPresent {
-			splittedDruidBasicPack[cirBasicPackColMapJsonBasicPackCol[cirBasicPackCol(index)]] = splittedCirBasicPack[index]
-
-		}
-	}
-	// now let's deal with specific fields
-	// timestamp in CDR to be converted into druid key values
-	timeDate, timeHour, timeMinSec, err := convertCirBasicPackTimeToDruidTimeStamp(splittedCirBasicPack[CirBpckCallStDate], splittedCirBasicPack[CirBpckCallStTime])
-	if err == nil {
-		splittedDruidBasicPack[JsonBpckCallStartDate] = timeDate
-		splittedDruidBasicPack[JsonBpckCallStartHour] = timeHour
-		splittedDruidBasicPack[JsonBpckCallStartMinsec] = timeMinSec
-	} else {
-		global.Logger.WithError(err).Warn("Unable to convert CDR timestamp to JSON format")
-		return nil, err
-	}
-	// the IP address of the switch to be converted from hexa to decimal ip address
-	ipAddress, _ := convertHexaIpToStringIp(splittedCirBasicPack[CirBpckSwitchIp])
-	splittedDruidBasicPack[JsonBpckSwitchIp] = ipAddress
-	return splittedDruidBasicPack, nil
-}
-
-// Function summary: take a cirpack CDR string as input and return a slide of
-// strings that match the JSON cdr format
-func convertCirRtpPackToJsonStringSlice(myCirRtpPack string) ([]string, error) {
-	var splittedJsonRtpPack []string
-	splittedCirRtpPack := strings.Split(myCirRtpPack, " ")
-	// we allocate a slice of the size of the json rtp pack mapping table (table of keys)
-	splittedJsonRtpPack = make([]string, len(jsonRtpPackColNameMap))
-	// Let's copy fields for which we have a 1 to 1 binding with cirpack rtp package
-	for index := 0; index < len(splittedCirRtpPack); index++ {
-		// we check if we have a mapping between cirpack column and CDR json Keys
-		if _, isPresent := cirRtpPackColMapJsonRtpPackCol[cirRtpPackCol(index)]; isPresent {
-			splittedJsonRtpPack[cirRtpPackColMapJsonRtpPackCol[cirRtpPackCol(index)]] = splittedCirRtpPack[index]
-		}
-	}
-	splittedIpAndPort := strings.Split(splittedCirRtpPack[CirRtpPackIpAAndPort], ":")
-	splittedJsonRtpPack[JsonRtpPackIp] = splittedIpAndPort[0]
-	splittedJsonRtpPack[JsonRtpPackPort] = splittedIpAndPort[1]
-	return splittedJsonRtpPack, nil
-}
-
-// Function summary: take a CDR basic package in string format and convert it
-// to a druid CDR JSON format as returned string
-func (myCdr *CirCdr) convertCirBasicPackToJson() (string, error) {
-	var druidBasicPack string
-	splittedDruidBasicPack, err := convertCirBasicPackToJsonStringSlice(myCdr.cirCdrPacks[0])
-	if err != nil {
-		global.Logger.WithError(err).Warn("Unable to convert CDR std pack to druid slice")
-		return "", err
-	}
-	// conversion into JSON format
-	for index := 0; index < len(jsonBasicPackColNameMap); index++ {
-		if jsonBasicPackCol(index) == JsonBpckConnDur || jsonBasicPackCol(index) == JsonBpckConnDurRg ||
-			jsonBasicPackCol(index) == JsonBpckTotDur {
-			druidBasicPack = fmt.Sprintf("%s\"%s\":%s,", druidBasicPack,
-				jsonBasicPackColNameMap[jsonBasicPackCol(index)], splittedDruidBasicPack[index])
-		} else {
-			druidBasicPack = fmt.Sprintf("%s\"%s\":\"%s\",", druidBasicPack,
-				jsonBasicPackColNameMap[jsonBasicPackCol(index)], splittedDruidBasicPack[index])
-		}
-	}
-	druidBasicPack = strings.TrimSuffix(druidBasicPack, ",")
-	return druidBasicPack, nil
-}
-
-// Function summary: take a CDR basic package in string format and convert it
-// to a druid CDR JSON format as returned string
-func (myCdr *CirCdr) convertCirOptionalPackToJson() (string, error) {
-	var endResult string
-	for _, myPack := range myCdr.cirCdrPacks {
-		switch myPack[0] {
-		case 'T':
-			// std package we do nothing
-		case 'S':
-			// Service node package
-		case 'H':
-			// Charging source package
-		case 'M':
-			// Multiple redirection package
-		case 'R':
-			// Reselection package
-		case 'G':
-			// Time Package
-		case 'K':
-			// Call Name package
-		case 'D':
-			// Call reference package
-		case 'V':
-			// Codec package
-		case 'O':
-			// RTP package
-			endResult = convertRtpPackIntoJson(myPack)
-		case 'E':
-			// IE list package
-		case 'L':
-			// Location number package
-		case 'Z':
-			// SIP call id package
-		case 'W':
-			// Associated Call reference package
-		case 'B':
-			// Original call reference package
-		case 'N':
-			// MSRN package
-		case 'U':
-			// Type user package
-		case 'Q':
-			// Out connect package
-		case 'X':
-			// P charging vectors package
-		case 'Y':
-			// Company and group ID package
-		case 'A':
-			// Additional cost package
-		case 'f':
-			// SIP forking package
-		default:
-			global.Logger.WithField("pack", myPack).Warn("unmanaged package")
-		}
-	}
-	return endResult, nil
-}
-
-func convertRtpPackIntoJson(myCirRtpPack string) string {
-	var jsonRtpPack string
-	rtpPackSlice, _ := convertCirRtpPackToJsonStringSlice(myCirRtpPack)
-	// we loop on all package fields and add double quote when it is non metric value
-	// for strings we add double quote
-	for index := 0; index < len(rtpPackSlice); index++ {
-		if jsonRtpPackCol(index) == JsonRtpPackAddiInfo || jsonRtpPackCol(index) == JsonRtpPackIp ||
-			jsonRtpPackCol(index) == JsonRtpPackPort {
-			jsonRtpPack = jsonRtpPack + "\"" + jsonRtpPackColNameMap[jsonRtpPackCol(index)] +
-				"\":\"" + rtpPackSlice[index] + "\","
-		} else {
-			jsonRtpPack = jsonRtpPack + "\"" + jsonRtpPackColNameMap[jsonRtpPackCol(index)] +
-				"\":" + rtpPackSlice[index] + ","
-		}
-
-	}
-	jsonRtpPack = strings.TrimSuffix(jsonRtpPack, ",")
-	return jsonRtpPack
-}
-
-// Function Summary: Takes Cirpack CDR time stamp information, parse it and returns it into pieces
-// date, hour, minute-seconds (all in strings)
-
-func convertCirBasicPackTimeToDruidTimeStamp(myCallDate string, myCallTime string) (string, string, string, error) {
-	if len(myCallDate) != 8 {
-		global.Logger.WithFields(logrus.Fields{
-			"call date": myCallDate,
-		}).Warn("Call date badly formatted unable to convert into JSON")
-		err := fmt.Errorf("call Date field badly formatted %s", myCallDate)
-		return "","","", err
-	}
-	myYear := myCallDate[0:4]
-	myMonth := myCallDate[4:6]
-	myDay := myCallDate[6:8]
-	// as timestamp is critical value
-	// let's do a sanity check of date value
-	if i, err := strconv.Atoi(myYear); err != nil || (i < 1900 && i > 2999) {
-		err := fmt.Errorf("year badly formatted %s", myYear)
-		return "","","", err
-	}
-	if i, err := strconv.Atoi(myMonth); err != nil || (i < 1 && i > 12) {
-		err := fmt.Errorf("month badly formatted %s", myMonth)
-		return "","","", err
-	}
-	if i, err := strconv.Atoi(myDay); err != nil || (i < 1 && i > 31) {
-		err := fmt.Errorf("day badly formatted %s", myDay)
-		return "","","", err
-	}
-	myHours := myCallTime[0:2]
-	myMins := myCallTime[2:4]
-	mySecs := myCallTime[4:6]
-	// let's do some sanity check of the time value
-	if i, err := strconv.Atoi(myHours); err != nil || (i > 24) {
-		err := fmt.Errorf("hour in time badly formatted %s", myHours)
-		return "","","", err
-	}
-	if i, err := strconv.Atoi(myMins); err != nil || (i > 59) {
-		err := fmt.Errorf("mimutes in time badly formatted %s", myMins)
-		return "","","", err
-	}
-	if i, err := strconv.Atoi(mySecs); err != nil || (i > 59) {
-		err := fmt.Errorf("seconds in time badly formatted %s", mySecs)
-		return "","","", err
-	}
-	// looks good let's format java style time stamp
-	return fmt.Sprintf("%s-%s-%s", myYear, myMonth, myDay),
-		fmt.Sprintf("%s", myHours),
-		fmt.Sprintf("%s-%s", myMins, mySecs), nil
-}
-
-// Function summary: it convert the IP address received as a string
-// with IP address in hexa into a string with IP address in decimal
-
-func convertHexaIpToStringIp(myHexaIp string) (string, error) {
-	var ipAddress [4]int64
-	var indexIp int
-	for index := 0; index < 8; index += 2 {
-		indexIp = index / 2
-		myByte, _ := strconv.ParseInt(myHexaIp[index:index+2], 16, 32)
-		ipAddress[indexIp] = myByte
-	}
-	return fmt.Sprintf("%d.%d.%d.%d", ipAddress[0], ipAddress[1], ipAddress[2], ipAddress[3]), nil
-}
-
-// Function summary: take a slice of bytes that contains circpack CDRs
-// and convert it into a slice of CirCdr structures
-
-func DeserializerCirCdr(myBuffer []byte, myOptionalTime string) (error, []CirCdr) {
-	var index = 0
-	var cirPackIndex = 0
-	var returnedCirCdrs []CirCdr
-	var currentCirCdr CirCdr
-	var currentPack string
-	var jsonTime string
-	if len(myBuffer) == 0 {
-		global.Logger.WithField("buffer len", "0").Warn("CDR deserializer received an empty buffer")
-		err := fmt.Errorf("CDR deserializer received an empty buffer")
-		return err, nil
-	}
-	if len(myOptionalTime) == 0 {
-		currentTime := time.Now().Unix()
-		currentTimeString := time.Unix(currentTime, 0)
-		jsonTime = global.FromUnixTimeToDruid(currentTimeString)
-	} else {
-		jsonTime = myOptionalTime
-	}
-	for index < len(myBuffer) {
-		currentCirCdr.length = 0
-		currentCirCdr.AppFlag = ""
-		currentCirCdr.IngestTime = jsonTime
-		currentCirCdr.ackCounter = 0
-		currentCirCdr.amountPack = 0
-		currentCirCdr.cirCdrPacks = nil
-		// let's create a byte io buffer for binary readings
-		bytesBuf := bytes.NewBuffer(myBuffer)
-		// let's check that we have the whole header we need
-		if index+15 >= len(myBuffer) {
-			global.Logger.WithField("index", index).Warn("We don't have the full cdr header")
-			return nil, returnedCirCdrs
-		}
-		// let's inspect this buf and check if we have the first 8 bytes
-		// the $ anchor cdr type and cdr length
-		checkDollar := rune(myBuffer[CirCdrDollarOffset+index])
-		if checkDollar != '$' {
-			global.Logger.WithFields(logrus.Fields{
-				"index": index,
-				"byte":  checkDollar,
-			}).Warn("CDR badly formatted dropping the whole segment")
-			break
-		}
-		// looks like we face a properly formatted CDR header
-		// let's position buffer on next coming cdr
-		bytesBuf.Next(index)
-		bytesBuf.Next(CirCdrAckCounterOffset)
-		var intTempo uint16 = 0
-		var readError error
-		readError = binary.Read(bytesBuf, binary.BigEndian, &intTempo)
-		if readError != nil {
-			global.Logger.WithError(readError).Warn("binary Read failed")
-			return readError, nil
-		}
-		bytesBuf.Next(CirCdrAppFlagOffset - (CirCdrAckCounterOffset + 2))
-		currentCirCdr.ackCounter = int(intTempo)
-		currentCirCdr.AppFlag, readError = bytesBuf.ReadString('$')
-		if readError != nil {
-			global.Logger.WithError(readError).Warn("Issue reading cdr App Flag")
-			return readError, nil
-		}
-		// remove trailing $
-		currentCirCdr.AppFlag = strings.TrimRight(currentCirCdr.AppFlag, "$")
-		var cdrLenAsString string
-		cdrLenAsString, readError = bytesBuf.ReadString(' ')
-		if readError != nil {
-			global.Logger.WithError(readError).Warn("Issue reading cdr length")
-			return readError, nil
-		}
-		cdrLenAsString = strings.TrimSpace(cdrLenAsString)
-		tempoLen, convErr := strconv.ParseInt(cdrLenAsString, 16, 32)
-		if convErr != nil {
-			global.Logger.WithError(convErr).Warn("Issue while converting cdr length")
-			return convErr, nil
-		}
-		currentCirCdr.length = int(tempoLen)
-		// we check we do have he whole cdr in buffer
-		if currentCirCdr.length > len(myBuffer)-index {
-			global.Logger.WithField("CDR length", currentCirCdr.length).Warn("We don't have the full cdr payload")
-			return nil, returnedCirCdrs
-		}
-		cirPackIndex = 15                           // we start reading package after the header fix size of 15 bytes
-		for cirPackIndex < currentCirCdr.length-4 { // 4 mysterious bytes as trailer
-			currentPack = ""
-			var packType byte
-			readError = binary.Read(bytesBuf, binary.BigEndian, &packType)
-			if readError != nil {
-				global.Logger.WithError(readError).Warn("unable to read package type")
-				return readError, nil
-			}
-			var packLenAsString string
-			packLenAsString, readError = bytesBuf.ReadString(' ')
-			if readError != nil {
-				global.Logger.WithError(readError).Warn("Issue reading pack length")
-				return readError, nil
-			}
-			packLenAsString = strings.TrimSpace(packLenAsString)
-			tempoLen, convErr := strconv.ParseInt(packLenAsString, 16, 32)
-			if convErr != nil {
-				global.Logger.WithError(convErr).Warn("Issue while converting pack length")
-				return convErr, nil
-			}
-			packLength := int(tempoLen)
-			remainingBytes := bytesBuf.Next(packLength)
-			currentPack = fmt.Sprintf("%s%s%s%s", string(packType), packLenAsString,
-				" ", string(remainingBytes[0:packLength-1])) // we remove trailer " " or 0x00
-			currentCirCdr.cirCdrPacks = append(currentCirCdr.cirCdrPacks, currentPack)
-			cirPackIndex = cirPackIndex + packLength + 5 // 5 bytes = 1 pack type , 3 len, 1 delimiter
-			currentCirCdr.amountPack++
-		}
-		bytesBuf.Next(4) // reading the 4 bytes as trailer
-		returnedCirCdrs = append(returnedCirCdrs, currentCirCdr)
-		index = index + currentCirCdr.length + 13 // header 14 bytes but len is one byte too long (cirpack bug ?)
-	}
-	return nil, returnedCirCdrs
-}
-
-// Function summary: there is a small difference between CDR in files and CDR's
-// received from a TCP socket or a pipe. This function convert a CDR received from a file
-// into a CDR as received from a socket
-
-func convertStringCdrToStreamCdr(myCdrStr string) (error, []byte) {
-
-	if len(myCdrStr) == 0 {
-		global.Logger.Warn("cannot convert an empty CDR string")
-		err := fmt.Errorf("cannot convert an empty cdr")
-		return err, nil
-	}
-	resultBytes := make([]byte, len(myCdrStr)+8+5) // adding the 8 bytes header and 5 bytes trailer
-	copy(resultBytes[8:], myCdrStr)
-	return nil, resultBytes
-}
-
-// CDR methods
-
-func (myCdr *CirCdr) CdrPrint() {
-	fmt.Println("================")
-	fmt.Println("Cdr ack counter: ", myCdr.ackCounter, " CDR app flag: ", myCdr.AppFlag, " length: ", myCdr.length)
-	fmt.Println("Amount of packages: ", myCdr.amountPack)
-	for _, myPack := range myCdr.cirCdrPacks {
-		fmt.Println("pack: ", myPack)
-	}
-	fmt.Println("++++++++++++++++")
-}
-
-// Method summary: send the JSON format of the CDR to Kafka producer
-
-func (myCdr *CirCdr) Send(myCdrProducer sarama.AsyncProducer, myTopic string) {
-	if len(myCdr.JsonEncoded) == 0 {
-		global.Logger.Warn("Cannot send empty JSON cdr to Kafka")
-		return
-	}
-	msg := &sarama.ProducerMessage{
-		Topic: myTopic,
-		Key:   nil,
-		Value: sarama.StringEncoder(myCdr.JsonEncoded)}
-	myCdrProducer.Input() <- msg
-}
-
-// Method summary: Add the JSON format of the CDR (key/values) in the CDR structure
-
-func (myCdr *CirCdr) JsonEncode() error {
-	// initialize string to ""
-	myCdr.JsonEncoded = ""
-	cdrAppTag := reflect.TypeOf(*myCdr).Field(1).Tag
-	appFlagKeyValue := string(cdrAppTag) + ":\"" + myCdr.AppFlag + "\""
-	cdrTimeStamp := reflect.TypeOf(*myCdr).Field(2).Tag
-	timestampKeyValue := string(cdrTimeStamp) + ":\"" + myCdr.IngestTime + "\""
-	basicPackJson, err := myCdr.convertCirBasicPackToJson()
-	if err != nil {
-		global.Logger.WithError(err).Warn("unable to convert cdr std package in JSON")
-		return err
-	}
-	optionalPack, err := myCdr.convertCirOptionalPackToJson()
-	if err != nil {
-		global.Logger.WithError(err).Warn("unable to convert cdr optional packages in JSON")
-		return err
-	}
-	myCdr.JsonEncoded = "{" + appFlagKeyValue + "," + timestampKeyValue + "," + basicPackJson
-	if len(optionalPack) != 0 {
-		myCdr.JsonEncoded = myCdr.JsonEncoded + "," + optionalPack
-	}
-	if len(myCdr.LibPhoneEnrich) != 0 {
-		myCdr.JsonEncoded = myCdr.JsonEncoded + "," + myCdr.LibPhoneEnrich
-	}
-	myCdr.JsonEncoded = myCdr.JsonEncoded + "}\n"
-	return nil
-}
-
-// Method summary: This method is calling the libphonenumber to enrich information
-// within the CDR structure geoloc/analysis... of called number
-
-func (myCdr *CirCdr) EnrichWibLibPhone() error {
-	var calledGeo string
-	var callingGeo string
-	if len(myCdr.cirCdrPacks) == 0 {
-		global.Logger.Warn("Cannot enrich an empty cirpack standard package")
-		return fmt.Errorf("empty cirpack std package")
-	}
-	myRealCalled, myNatOfRealCalled, err := getStandardCalledNumFromCirCdrPack(myCdr.cirCdrPacks[0])
-	if err != nil {
-		global.Logger.WithError(err).Warn("Error creating E164 called number, doing the best we can ... ")
-	}
-	switch myNatOfRealCalled {
-	case "2", "0":
-		{
-			myCdr.LibPhoneEnrich = fmt.Sprintf("\"called_country_code\":\"unknown code\",\"called_country\":\"ZZ\",\"called_number_type\":\"unknown type\",\"called_number_location\":\"unknown location\"")
-		}
-	case "115":
-		{
-			myCdr.LibPhoneEnrich = fmt.Sprintf("\"called_country_code\":\"33\",\"called_country\":\"FR\",\"called_number_type\":\"short num\",\"called_number_location\":\"unknown location\"")
-		}
-	default:
-		// removing too buggy called number before calling the libphonenumber
-		if !strings.Contains(myRealCalled, "+0") {
-			calledGeo = PstnColumnFromCalledNum(myRealCalled)
-			if len(calledGeo) != 0 {
-				myCdr.LibPhoneEnrich = calledGeo
-			}
-		}
-	}
-	myRealCalling, myNatOfRealCalling, err := getStandardCallingNumFromCirCdrPack(myCdr.cirCdrPacks[0])
-	if err != nil {
-		global.Logger.WithError(err).Warn("Error creating E164 calling number, doing the best we can ... ")
-	}
-	switch myNatOfRealCalling {
-	case "2", "0":
-		{
-			if len(myCdr.LibPhoneEnrich) != 0 {
-				myCdr.LibPhoneEnrich = myCdr.LibPhoneEnrich + ",\"calling_country_code\":\"unknown code\",\"calling_country\":\"ZZ\",\"calling_number_type\":\"unknown type\",\"calling_number_location\":\"unknown location\""
-			} else {
-				myCdr.LibPhoneEnrich = "\"calling_country_code\":\"unknown code\",\"calling_country\":\"ZZ\",\"calling_number_type\":\"unknown type\",\"calling_number_location\":\"unknown location\""
-			}
-			return nil
-		}
-	case "115":
-		{
-			if len(myCdr.LibPhoneEnrich) != 0 {
-				myCdr.LibPhoneEnrich = myCdr.LibPhoneEnrich + ",\"calling_country_code\":\"33\",\"calling_country\":\"FR\",\"calling_number_type\":\"short num\",\"calling_number_location\":\"unknown location\""
-			} else {
-				myCdr.LibPhoneEnrich = "\"calling_country_code\":\"33\",\"calling_country\":\"FR\",\"calling_number_type\":\"short num\",\"calling_number_location\":\"unknown location\""
-			}
-			return nil
-		}
-	default:
-		// removing too buggy called number before calling the libphonenumber
-		if !strings.Contains(myRealCalling, "+0") {
-			callingGeo = PstnColumnFromCallingNum(myRealCalling)
-			if len(myCdr.LibPhoneEnrich) != 0 && len(callingGeo) != 0 {
-				myCdr.LibPhoneEnrich = myCdr.LibPhoneEnrich + "," + callingGeo
-			} else if len(callingGeo) != 0 {
-				myCdr.LibPhoneEnrich = callingGeo
-			} else {
-				myCdr.LibPhoneEnrich = ""
-			}
-		}
-	}
-	return nil
-}
-
-// Function summary: this function take a CDR in a string format (unparsed) and
-// provide a E164 format of the called number in the CDR
-func getStandardCalledNumFromCirCdrPack(myCirCdrPack string) (string, string, error) {
-	if len(myCirCdrPack) == 0 {
-		global.Logger.Warn("Cannot enrich an empty cirpack standard package")
-		return "","", fmt.Errorf("empty parameter")
-	}
-	splittedDruidBasicPack, err := convertCirBasicPackToJsonStringSlice(myCirCdrPack)
-	if err != nil {
-		global.Logger.WithError(err).Warn("Unable to convert CDR std pack to json slice")
-		return "","", err
-	}
-	return getStandardNumFromRawNumber(splittedDruidBasicPack[JsonBpckNatRealCalledNum],
-		splittedDruidBasicPack[JsonBpckRealCalledNum])
-}
-
-// Same for calling number
-func getStandardCallingNumFromCirCdrPack(myCirCdrPack string) (string, string, error) {
-	if len(myCirCdrPack) == 0 {
-		global.Logger.Warn("Cannot enrich an empty cirpack standard package")
-		return "","", fmt.Errorf("empty parameter")
-	}
-	splittedDruidBasicPack, err := convertCirBasicPackToJsonStringSlice(myCirCdrPack)
-	if err != nil {
-		global.Logger.WithError(err).Warn("Unable to convert CDR std pack to json slice")
-		return "","", err
-	}
-	return getStandardNumFromRawNumber(splittedDruidBasicPack[JsonBpckNatCallingNum],
-		splittedDruidBasicPack[JsonBpckCallingNum])
-}
-
-
-func getStandardNumFromRawNumber(myNatureOfNumber string, myNumber string) (string, string, error) {
-	switch myNatureOfNumber {
-	case "3": // national call
-		if strings.HasPrefix(myNumber, "262") ||
-			strings.HasPrefix(myNumber, "692") ||
-			strings.HasPrefix(myNumber, "693") {
-			return "+262" + myNumber, myNatureOfNumber, nil
-		} else if strings.HasPrefix(myNumber, "590") ||
-			strings.HasPrefix(myNumber, "690") {
-			return "+590" + myNumber, myNatureOfNumber, nil
-		} else if strings.HasPrefix(myNumber, "594") ||
-			strings.HasPrefix(myNumber, "694") {
-			return "+594" + myNumber, myNatureOfNumber, nil
-		} else if strings.HasPrefix(myNumber, "596") ||
-			strings.HasPrefix(myNumber, "696") {
-			return "+596" + myNumber, myNatureOfNumber, nil
-		} else {
-			return "+33" + myNumber, myNatureOfNumber, nil
-		}
-	case "4": // international calls
-		return "+" + myNumber, myNatureOfNumber, nil
-	case "2":
-		return "", myNatureOfNumber, fmt.Errorf("libphone cannot deal with unknown number")
-	case "115":
-		return "", myNatureOfNumber, fmt.Errorf("libphone cannot deal with short number")
-	default:
-		global.Logger.WithField("nature of real called", myNatureOfNumber).Warn("unknown nature")
-		return "", myNatureOfNumber, fmt.Errorf("nature of real called unknown")
-	}
-}
-
-
-func convertCdrFileNameToTimeStamp(myFileName string) (string, error){
-	splittedFileName := strings.Split(myFileName, "_")
-	if len(splittedFileName) == 0 {
-		return "", fmt.Errorf("empty file name")
-	}
-	myFileTime := splittedFileName[len(splittedFileName)-1]
-	myParsedTime := myFileTime[0:4] + "-" + myFileTime[4:6] + "-" + myFileTime[6:8] + "T" + myFileTime[8:10] + ":" +
-		myFileTime[10:12] + ":00.000Z"
-	return myParsedTime, nil
 }
