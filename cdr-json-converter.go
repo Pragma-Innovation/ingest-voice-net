@@ -137,7 +137,6 @@ func batchCdrMainFunc(myFilesIn fileList, myDirIn string, mySliceSize string, my
 		jsonFileNameOuput := fmt.Sprintf("%s/%s", myDirOutput, myFileOut)
 		if myDruidCdrFileDescr, err := os.Create(string(jsonFileNameOuput)); err == nil {
 			defer myDruidCdrFileDescr.Close()
-			global.SetBatchStartTime()
 			if len(myFilesIn) != 0 {
 				for _, myCdrFile := range myFilesIn {
 					bytesQty, errWr = cdrtools.ConvertCirpackCdrsToJsonFromFileToFileDescriptor(myCdrFile, myDruidCdrFileDescr)
@@ -297,7 +296,6 @@ func microBatchMainFunc(myDirIn string, myDirOutput string, myFileOut string, my
 		if err != nil {
 			global.Logger.WithError(err).Fatal("Wrong Loop time out")
 		}
-		global.SetBatchStartTime()
 		time.Sleep(myMicroBatchLoopTimeOutDur)
 		for {
 			global.Logger.Print("Starting a micro batch cycle")
@@ -308,7 +306,6 @@ func microBatchMainFunc(myDirIn string, myDirOutput string, myFileOut string, my
 			// but let's sleep 2 seconds make sure we do not post info
 			// with timestamp equal to end of interval
 			time.Sleep(2 * time.Second)
-			global.SetBatchStartTime()
 			druidInterval := fmt.Sprintf("%s/%s", druidIntervalStart, druidIntervalEnd)
 			// We done the conversion into JSON let's post all JSON files to druid
 			if bytesWritten != 0 {
@@ -319,7 +316,6 @@ func microBatchMainFunc(myDirIn string, myDirOutput string, myFileOut string, my
 				}).Info("All HTTP POST Done")
 			}
 			time.Sleep(myMicroBatchLoopTimeOutDur)
-			global.SetBatchStartTime()
 		}
 	} else {
 		flag.PrintDefaults()
@@ -368,7 +364,6 @@ func batchStreamMainFunc(myDirInput string, myMicroBLoopTimeOut string,
 	if err != nil {
 		global.Logger.WithError(err).Fatal("Wrong Loop time out")
 	}
-	global.SetBatchStartTime()
 	// create cdr producer on kafka broker
 	// no need to check return as program exits if kafka fails
 	var brokerListWithPort []string
@@ -407,7 +402,6 @@ func batchStreamMainFunc(myDirInput string, myMicroBLoopTimeOut string,
 		for {
 
 			time.Sleep(myMicroBatchLoopTimeOutDur)
-			global.SetBatchStartTime()
 			global.Logger.WithFields(logrus.Fields{
 				"time": global.GetBatchStartTime(),
 			}).Print("Starting a batch stream cycle")

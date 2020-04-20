@@ -97,8 +97,24 @@ func PurgeCdrFiles(myFiles []string) {
 	}
 }
 
-func SetBatchStartTime() {
-	StartBatchTime = time.Now().Unix()
+func SetBatchStartTime(fileName string) {
+	// we try to get time stamp out of the file name if we fail we set the time stamp ourselves
+	if len(fileName) != 0 {
+		fileSlices := strings.Split(fileName, "_")
+		fileDate := fileSlices[len(fileSlices)-1]
+		dateTimeStr := fileDate[0:4] + "-" + fileDate[4:6] +
+			"-" + fileDate[6:8]+ "T" + fileDate[8:10] + ":" + fileDate[10:12] + ":00Z"
+		t, err := time.Parse(time.RFC3339, dateTimeStr)
+		if err != nil {
+			Logger.WithError(err).Warn("unable to parse cdr date and time")
+			// we failed we set our own clock
+			StartBatchTime = time.Now().Unix()
+		}
+		Logger.WithField("date", t).Debug("time stamp for batch")
+		StartBatchTime = t.Unix()
+	} else {
+		StartBatchTime = time.Now().Unix()
+	}
 }
 
 func GetBatchStartTime() int64 {

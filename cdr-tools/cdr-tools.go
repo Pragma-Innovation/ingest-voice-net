@@ -566,6 +566,8 @@ func ConvertCirpackCdrsFromFileToJsonStringSlice(cdrFile string) ([]string, erro
 	var returnedSlice []string
 	if cdrFileDesc, err := os.Open(cdrFile); err == nil {
 		defer cdrFileDesc.Close()
+		global.Logger.WithField("file", cdrFile).Debug("dealing with cdr file")
+		global.SetBatchStartTime(cdrFile)
 		// create a new scanner and read the file line by line
 		scanner := bufio.NewScanner(cdrFileDesc)
 		for scanner.Scan() {
