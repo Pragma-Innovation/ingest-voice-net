@@ -29,7 +29,7 @@ type CirpackCdrJsonTimeSeries struct {
     AccessTypeCalledNumber              string `json:"access_type_called_number"`
     NumberPlanCalledParty               string `json:"number_plan_called_party"`
     NatureCalledNumber                  string `json:"nature_called_number"`
-    CalledNumber                        string `json:"called_num"`
+    CalledNumber                        string `json:"called_number"`
     CategoryRealCalledNumber            string `json:"category_real_called_number"`
     TypeRealCalledNumber                string `json:"type_real_called_number"`
     NatRealCalled                       string `json:"nat_real_called"`

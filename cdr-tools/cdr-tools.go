@@ -75,7 +75,7 @@ type CirpackBasicPackage struct {
 	AccessTypeCalledNumber              string `json:"access_type_called_number"`
 	NumberPlanCalledParty               string `json:"number_plan_called_party"`
 	NatureCalledNumber                  string `json:"nature_called_number"`
-	CalledNum                           string `json:"called_num"`
+	CalledNumber                        string `json:"called_number"`
 	CategoryRealCalledNumber            string `json:"category_real_called_number"`
 	TypeRealCalledNumber                string `json:"type_real_called_number"`
 	NatRealCalled                       string `json:"nat_real_called"`
@@ -218,12 +218,12 @@ func newCirpackCdrBlocks() *CirpackCdrBlocks {
 	return &CirpackCdrBlocks{}
 }
 
-func (cdrBlocks *CirpackCdrBlocks) SetIngestTimeNow() {
-	cdrBlocks.IngestTime = time.Now().Unix()
+func (cdrBlocks *CirpackCdrBlocks) SetIngestTime() {
+	cdrBlocks.IngestTime = global.GetBatchStartTime()
 }
 
 func (cdrBlocks *CirpackCdrBlocks) ReadBlocksFromStringCdr(cdrString string) error {
-	cdrBlocks.SetIngestTimeNow()
+	cdrBlocks.SetIngestTime()
 	remainingSting, err := cdrBlocks.ReadHeaderBlock(cdrString)
 	if err != nil {
 		global.Logger.WithError(err).Warn("unable to read header block from CDR")
@@ -343,6 +343,19 @@ func CopySameTaggedField(source interface{}, destination interface{}) error {
 	return nil
 }
 
+// small function to convert and ip from its hexadecimal format to dotted format
+
+func convertHexaIpToStringIp(myHexaIp string) string {
+	var ipAddress [4]int64
+	var indexIp int
+	for index := 0; index < 8; index += 2 {
+		indexIp = index / 2
+		myByte, _ := strconv.ParseInt(myHexaIp[index:index+2], 16, 32)
+		ipAddress[indexIp] = myByte
+	}
+	return fmt.Sprintf("%d.%d.%d.%d", ipAddress[0], ipAddress[1], ipAddress[2], ipAddress[3])
+}
+
 // Methods of Cirpack packages (must comply to CirpackPackage interface)
 // Basic package
 
@@ -366,6 +379,8 @@ func (basicPack *CirpackBasicPackage) FulfilCdrTsJsonWithCustomFields(cdrTsModel
 		return err
 	}
 	cdrTsModel.CallStartDateTime = t.Unix()
+	// let's convert ip address of the switch to a readable value
+	cdrTsModel.SwitchIp = convertHexaIpToStringIp(cdrTsModel.SwitchIp)
 	return nil
 }
 

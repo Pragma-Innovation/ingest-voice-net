@@ -13,6 +13,10 @@ import (
 
 var Logger = logrus.New()
 
+// Time variable wet when starting a new batch
+
+var StartBatchTime int64
+
 // init() just managing logger initialisation
 
 func init() {
@@ -31,13 +35,6 @@ func SetLogLevel(myLevel string) {
 		return
 	}
 	return
-}
-
-// Function to convert unix time to druid timestamp for batch interval
-
-func FromUnixTimeToDruid(myUnixTime time.Time) string {
-	timeSlice := strings.Split(myUnixTime.String(), " ")
-	return fmt.Sprintf("%sT%s.000Z", timeSlice[0], timeSlice[1])
 }
 
 // Function to get rid of the file under processing (don't touch till it is closed)
@@ -98,4 +95,12 @@ func PurgeCdrFiles(myFiles []string) {
 			"deleted cdr": myFile,
 		}).Info("Cleaning of cdr folder")
 	}
+}
+
+func SetBatchStartTime() {
+	StartBatchTime = time.Now().Unix()
+}
+
+func GetBatchStartTime() int64 {
+	return StartBatchTime
 }
