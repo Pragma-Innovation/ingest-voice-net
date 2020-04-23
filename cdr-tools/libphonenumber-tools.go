@@ -22,50 +22,32 @@ var descNumTypeFromType = map[phonenumbers.PhoneNumberType]string {
 	phonenumbers.UNKNOWN:              "unknown",
 }
 
-func PstnColumnFromCalledNum(myNumber string) string {
-	num, err := phonenumbers.Parse(myNumber, "FR")
+// Function that bundle lobphonenumber call. Takes a phone number as input
+// returns 4 strings : country code, country, location, phone number type
+
+func LibPhoneNumberEnrichFields(myNumber string) (string, string, string, string) {
+	var num *phonenumbers.PhoneNumber
+	var err error
+	var geo string
+	num, err = phonenumbers.Parse(myNumber, "FR")
 	if err != nil {
 		global.Logger.WithFields(logrus.Fields{
 			"error": err,
 			"number": myNumber,
 		}).Info("unable to parse number")
-		return ""
+		return "", "", "", ""
 	}
 
-	geo, err := phonenumbers.GetGeocodingForNumber(num, "fr")
+	geo, err = phonenumbers.GetGeocodingForNumber(num, "fr")
 	if err != nil {
 		global.Logger.WithFields(logrus.Fields{
 			"error": err,
 			"number": myNumber,
 		}).Info("unable to GeoCode this number")
+		return "", "", "", ""
 	}
-	result := "\"called_country_code\":\"" + strconv.Itoa(int(num.GetCountryCode())) + "\",\"called_country\":\"" +
-		phonenumbers.GetRegionCodeForNumber(num) + "\",\"called_number_type\":\"" +
-		descNumTypeFromType[phonenumbers.GetNumberType(num)] + "\",\"called_number_location\":\"" +
-		geo + "\""
-	return result
-}
-
-func PstnColumnFromCallingNum(myNumber string) string {
-	num, err := phonenumbers.Parse(myNumber, "FR")
-	if err != nil {
-		global.Logger.WithFields(logrus.Fields{
-			"error": err,
-			"number": myNumber,
-		}).Info("unable to parse number")
-		return ""
-	}
-
-	geo, err := phonenumbers.GetGeocodingForNumber(num, "fr")
-	if err != nil {
-		global.Logger.WithFields(logrus.Fields{
-			"error": err,
-			"number": myNumber,
-		}).Info("unable to GeoCode this number")
-	}
-	result := "\"calling_country_code\":\"" + strconv.Itoa(int(num.GetCountryCode())) + "\",\"calling_country\":\"" +
-		phonenumbers.GetRegionCodeForNumber(num) + "\",\"calling_number_type\":\"" +
-		descNumTypeFromType[phonenumbers.GetNumberType(num)] + "\",\"calling_number_location\":\"" +
-		geo + "\""
-	return result
+	cc := strconv.Itoa(int(num.GetCountryCode()))
+	country := phonenumbers.GetRegionCodeForNumber(num)
+	numType := descNumTypeFromType[phonenumbers.GetNumberType(num)]
+	return cc, country, geo, numType
 }

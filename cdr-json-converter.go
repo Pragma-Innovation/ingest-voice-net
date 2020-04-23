@@ -11,10 +11,8 @@ import (
 	"github.com/Shopify/sarama"
 	"github.com/flosch/pongo2"
 	"github.com/sirupsen/logrus"
-	"io"
 	"io/ioutil"
 	"math"
-	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -51,11 +49,10 @@ var userCdrFiles fileList
 var userKafkaBrokerList kafkaBrokerList
 
 var (
-	userMode               = flag.String("mode", "", "MANDATORY: mode of execution, could be \"batch\" or \"streaming\" or \"micro-batch\"")
+	userMode               = flag.String("mode", "", "MANDATORY: mode of execution, could be \"batch\" or \"micro-batch\"")
 	userDruidBatchFqdn     = flag.String("batch-fqdn", "", "MANDATORY BATCH MODE: gives the fqdn of druid cluster for batch ingest")
 	userDruidIntervals     = flag.String("batch-intervals", "", "MANDATORY BATCH MODE: gives intervals of time of batch ingestion")
 	userDruidSchemaTpl     = flag.String("batch-tpl", "", "MANDATORY BATCH MODE: Template file druid schema for batch ingest")
-	userStreamPort         = flag.String("tcp-port", "", "MANDATORY STREAM MODE: TCP port to be used for receive cirpack cdr's")
 	userKafkaBrokerPort    = flag.String("kafka-port", "", "MANDATORY STREAM MODE: TCP port of Kafka broker")
 	userKafkaDruidCdrTopic = flag.String("kafka-topic", "", "MANDATORY STREAM MODE: Kafka topic for JSON cdr producer")
 	userDirOutput          = flag.String("path-json", "", "MANDATORY BATCH MODE: path to create json output files")
@@ -72,15 +69,6 @@ var (
 
 // End of flag declaration
 
-// variable and type for stream mode
-
-type rawCirCdr string
-
-// buffered channel for communication between TCP server go routine
-// and go routine converting cir CDR to JSON and send it to Kafka
-// we assume a 250 buffer should be enough
-
-var chCirCdr = make(chan rawCirCdr, 250)
 
 func main() {
 	flag.Var(&userCdrFiles, "file-cdr", "OPTIONAL BATCH MODE: List of CDR files")
@@ -105,12 +93,6 @@ func main() {
 				"amount": postDone,
 				"err":    err,
 			}).Info("All HTTP POST Done")
-		}
-	case "streaming":
-		{
-			streamCdrMainFunc(*userStreamPort, userKafkaBrokerList,
-				*userKafkaBrokerPort, *userKafkaDruidCdrTopic, *userKafkaCertFile, *userKafkaKeyFile,
-				*userKafkaCaFile, *userKafkaVerifySsl)
 		}
 	case "micro-batch":
 		{
@@ -157,7 +139,7 @@ func batchCdrMainFunc(myFilesIn fileList, myDirIn string, mySliceSize string, my
 			defer myDruidCdrFileDescr.Close()
 			if len(myFilesIn) != 0 {
 				for _, myCdrFile := range myFilesIn {
-					bytesQty, errWr = cdrtools.ConvertCirCdrFileToDruidCdrFile(myCdrFile, myDruidCdrFileDescr)
+					bytesQty, errWr = cdrtools.ConvertCirpackCdrsToJsonFromFileToFileDescriptor(myCdrFile, myDruidCdrFileDescr)
 					if errWr != nil {
 						global.Logger.WithError(errWr).Fatal("unable to convert cdr file")
 					}
@@ -182,7 +164,7 @@ func batchCdrMainFunc(myFilesIn fileList, myDirIn string, mySliceSize string, my
 				}).Info("Starting the cdr conversion process...")
 				for _, myCdrFile := range allFilesPath {
 					fullPathAndFile := fmt.Sprintf("%s/%s", string(myDirIn), myCdrFile.Name())
-					bytesQty, errWr = cdrtools.ConvertCirCdrFileToDruidCdrFile(fullPathAndFile, myDruidCdrFileDescr)
+					bytesQty, errWr = cdrtools.ConvertCirpackCdrsToJsonFromFileToFileDescriptor(fullPathAndFile, myDruidCdrFileDescr)
 					if errWr != nil {
 						global.Logger.WithError(errWr).Fatal("Failed to convert cdr file")
 						return 0
@@ -280,7 +262,7 @@ func postBatchToDruidCluster(myFileOut string, myDirInput string, myDruidCluster
 		}
 		global.Logger.WithFields(logrus.Fields{
 			"postJSON": postData,
-		}).Info("JSON request")
+		}).Debug("JSON request")
 		druidClusterApi := fmt.Sprintf("http://%s/druid/indexer/v1/task", myDruidCluster)
 		req, err := http.NewRequest("POST", druidClusterApi, strings.NewReader(postData))
 		if err != nil {
@@ -299,108 +281,12 @@ func postBatchToDruidCluster(myFileOut string, myDirInput string, myDruidCluster
 	return 0, nil
 }
 
-// Stream cdr functions
-
-func streamCdrMainFunc(myStreamPort string, myKafkaBroker []string, myKafkaPort string, myTopic string,
-	myKafkaCertFile string, myKafkaKeyFile string, myKafkaCaFile string, myKafkaVerifySsl bool) error {
-	// let's check if we have all we need
-	if len(myStreamPort) == 0 || len(myKafkaBroker) == 0 || len(myKafkaPort) == 0 || len(myTopic) == 0 {
-		flag.PrintDefaults()
-		global.Logger.Fatal("missing required argument for stream service")
-	}
-	// create cdr producer on kafka broker
-	// create cdr producer on kafka broker
-	// no need to check return as program exits if kafka fails
-	var brokerListWithPort []string
-	for _, myBroker := range myKafkaBroker {
-		myBrokerWithPort := fmt.Sprintf("%s:%s", myBroker, myKafkaPort)
-		brokerListWithPort = append(brokerListWithPort, myBrokerWithPort)
-	}
-	cdrProducerConfig := sarama.NewConfig()
-	cdrProducerTlsConfig := createTlsConfiguration(myKafkaCertFile, myKafkaKeyFile, myKafkaCaFile,
-		myKafkaVerifySsl)
-	if cdrProducerTlsConfig != nil {
-		cdrProducerConfig.Net.TLS.Enable = true
-		cdrProducerConfig.Net.TLS.Config = cdrProducerTlsConfig
-	}
-	cdrProducerConfig.Producer.RequiredAcks = sarama.WaitForAll         // Only wait for the leader to ack
-	cdrProducerConfig.Producer.Compression = sarama.CompressionSnappy   // Compress messages
-	cdrProducerConfig.Producer.Flush.Frequency = 500 * time.Millisecond // Flush batches every 500ms
-	// assumes we fill up the queue un in this timeout
-	cdrProducerConfig.Producer.Return.Successes = true
-	cdrProducerConfig.ChannelBufferSize = 4000 // Buffer of messages
-	cdrProducer, err := sarama.NewAsyncProducer(brokerListWithPort, cdrProducerConfig)
-
-	// launch go routine as kafka producer
-	go druidCdrKafkaWriter()
-	// Listen for incoming connections.
-	cdrSocket, err := net.Listen("tcp", "localhost"+":"+myStreamPort)
-	if err != nil {
-		global.Logger.WithError(err).Fatal("Unable to set server socket")
-	}
-	// Close the listener when the application closes.
-	defer cdrSocket.Close()
-	global.Logger.WithFields(logrus.Fields{
-		"host": "localhost",
-		"port": myStreamPort,
-	}).Info("Entering server loop on socket")
-	for {
-		// Listen for an incoming connection.
-		conn, err := cdrSocket.Accept()
-		if err != nil {
-			global.Logger.WithError(err).Fatal("unable to read incoming connection")
-		}
-		// Handle connections in a new goroutine.
-		go handleCdrConnect(conn, cdrProducer, myTopic)
-	}
-	return nil
-}
-
-func handleCdrConnect(myCdrConnect net.Conn, myCdrProducer sarama.AsyncProducer, myCdrTopic string) {
-	// manage CDR messages coming from a tcp connection
-	// Make a buffer to hold incoming data.
-	buf := make([]byte, 10000)
-	var totalPDU []byte
-	totalPDU = nil
-	// Read the incoming traffic till EOF
-	for {
-		amountBytes, err := myCdrConnect.Read(buf)
-		if err != nil {
-			if err != io.EOF {
-				global.Logger.WithError(err).Warn("Unable to read incoming tcp message")
-			}
-			break
-		}
-		totalPDU = append(totalPDU, buf[:amountBytes]...)
-	}
-	err, receivedCdr := cdrtools.DeserializerCirCdr(totalPDU, "")
-	if err != nil {
-		global.Logger.WithError(err).Warn("unable to deserialize TCP pdu")
-		return
-	}
-	for _, myCdr := range receivedCdr {
-		myCdr.CdrPrint()
-		myCdr.JsonEncode()
-		myCdr.Send(myCdrProducer, myCdrTopic)
-	}
-	// Close the connection when you're done with it.
-	myCdrConnect.Close()
-}
-
-func druidCdrKafkaWriter() {
-	receivedCdr := <-chCirCdr
-	fmt.Printf("producer received : %s\n", receivedCdr)
-}
 
 // Micro Batch related functions
 
 func microBatchMainFunc(myDirIn string, myDirOutput string, myFileOut string, myDruidFqdn string,
 	myDruidSchemaTpl string, myMicroBatchLoopTimeOut string) {
-	var startBatchTime int64
-	var startBatchTimeTime time.Time
 	var druidIntervalStart string
-	var endBatchTime int64
-	var endBatchTimeTime time.Time
 	var druidIntervalEnd string
 
 	if (len(myDirIn) != 0) && len(myFileOut) != 0 &&
@@ -410,9 +296,6 @@ func microBatchMainFunc(myDirIn string, myDirOutput string, myFileOut string, my
 		if err != nil {
 			global.Logger.WithError(err).Fatal("Wrong Loop time out")
 		}
-		startBatchTime = time.Now().Unix()
-		startBatchTimeTime = time.Unix(startBatchTime, 0)
-		druidIntervalStart = global.FromUnixTimeToDruid(startBatchTimeTime)
 		time.Sleep(myMicroBatchLoopTimeOutDur)
 		for {
 			global.Logger.Print("Starting a micro batch cycle")
@@ -423,9 +306,6 @@ func microBatchMainFunc(myDirIn string, myDirOutput string, myFileOut string, my
 			// but let's sleep 2 seconds make sure we do not post info
 			// with timestamp equal to end of interval
 			time.Sleep(2 * time.Second)
-			endBatchTime = time.Now().Unix()
-			endBatchTimeTime = time.Unix(endBatchTime, 0)
-			druidIntervalEnd = global.FromUnixTimeToDruid(endBatchTimeTime)
 			druidInterval := fmt.Sprintf("%s/%s", druidIntervalStart, druidIntervalEnd)
 			// We done the conversion into JSON let's post all JSON files to druid
 			if bytesWritten != 0 {
@@ -436,9 +316,6 @@ func microBatchMainFunc(myDirIn string, myDirOutput string, myFileOut string, my
 				}).Info("All HTTP POST Done")
 			}
 			time.Sleep(myMicroBatchLoopTimeOutDur)
-			startBatchTime = time.Now().Unix()
-			startBatchTimeTime = time.Unix(startBatchTime, 0)
-			druidIntervalStart = global.FromUnixTimeToDruid(startBatchTimeTime)
 		}
 	} else {
 		flag.PrintDefaults()
@@ -487,9 +364,6 @@ func batchStreamMainFunc(myDirInput string, myMicroBLoopTimeOut string,
 	if err != nil {
 		global.Logger.WithError(err).Fatal("Wrong Loop time out")
 	}
-	startBatchTime := time.Now().Unix()
-	startBatchTimeTime := time.Unix(startBatchTime, 0)
-	druidIntervalStart := global.FromUnixTimeToDruid(startBatchTimeTime)
 	// create cdr producer on kafka broker
 	// no need to check return as program exits if kafka fails
 	var brokerListWithPort []string
@@ -528,11 +402,8 @@ func batchStreamMainFunc(myDirInput string, myMicroBLoopTimeOut string,
 		for {
 
 			time.Sleep(myMicroBatchLoopTimeOutDur)
-			startBatchTime = time.Now().Unix()
-			startBatchTimeTime = time.Unix(startBatchTime, 0)
-			druidIntervalStart = global.FromUnixTimeToDruid(startBatchTimeTime)
 			global.Logger.WithFields(logrus.Fields{
-				"time": druidIntervalStart,
+				"time": global.GetBatchStartTime(),
 			}).Print("Starting a batch stream cycle")
 			myCdrs, err := cdrtools.ConvertCdrFolderToCdrs(myDirInput, true)
 			if err != nil {
@@ -540,16 +411,10 @@ func batchStreamMainFunc(myDirInput string, myMicroBLoopTimeOut string,
 			}
 			// We  are done reading CDR's, we need to enrich, convert to JSON and send to Kafka
 			for _, myCdr := range myCdrs {
-				myCdr.EnrichWibLibPhone()
-				myCdr.JsonEncode()
-				if len(myCdr.JsonEncoded) == 0 {
-					global.Logger.Warn("Cannot send empty JSON cdr to Kafka")
-					return
-				}
 				msg := &sarama.ProducerMessage{
 					Topic: myTopic,
 					Key:   sarama.StringEncoder("thereisnokey"),
-					Value: sarama.StringEncoder(myCdr.JsonEncoded)}
+					Value: sarama.StringEncoder(myCdr)}
 				select {
 				case cdrProducer.Input() <- msg:
 					enqueued++
@@ -570,19 +435,3 @@ func batchStreamMainFunc(myDirInput string, myMicroBLoopTimeOut string,
 	}).Warn("exiting producer")
 }
 
-// Function summary: wrap all required actions when a micro batch cycle is successful
-// will be called as a go routine as part of batch cycle main loop
-// It enriches the all CDR's, convert it to JSON and send it to Kafka broker's
-
-func enrichConvertSendCdrs(myCdrs []cdrtools.CirCdr, myCdrProducer sarama.AsyncProducer, myTopic string) {
-	var loop int
-	for _, myCdr := range myCdrs {
-		fmt.Printf("%d\n", loop)
-		loop++
-		myCdr.EnrichWibLibPhone()
-		myCdr.JsonEncode()
-		myCdr.Send(myCdrProducer, myTopic)
-	}
-	fmt.Printf("\n")
-	global.Logger.Info("All druid CDRs posted to Kafka")
-}

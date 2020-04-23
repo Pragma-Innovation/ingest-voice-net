@@ -13,6 +13,10 @@ import (
 
 var Logger = logrus.New()
 
+// Time variable wet when starting a new batch
+
+var StartBatchTime int64
+
 // init() just managing logger initialisation
 
 func init() {
@@ -31,13 +35,6 @@ func SetLogLevel(myLevel string) {
 		return
 	}
 	return
-}
-
-// Function to convert unix time to druid timestamp for batch interval
-
-func FromUnixTimeToDruid(myUnixTime time.Time) string {
-	timeSlice := strings.Split(myUnixTime.String(), " ")
-	return fmt.Sprintf("%sT%s.000Z", timeSlice[0], timeSlice[1])
 }
 
 // Function to get rid of the file under processing (don't touch till it is closed)
@@ -98,4 +95,28 @@ func PurgeCdrFiles(myFiles []string) {
 			"deleted cdr": myFile,
 		}).Info("Cleaning of cdr folder")
 	}
+}
+
+func SetBatchStartTime(fileName string) {
+	// we try to get time stamp out of the file name if we fail we set the time stamp ourselves
+	if len(fileName) != 0 {
+		fileSlices := strings.Split(fileName, "_")
+		fileDate := fileSlices[len(fileSlices)-1]
+		dateTimeStr := fileDate[0:4] + "-" + fileDate[4:6] +
+			"-" + fileDate[6:8]+ "T" + fileDate[8:10] + ":" + fileDate[10:12] + ":00Z"
+		t, err := time.Parse(time.RFC3339, dateTimeStr)
+		if err != nil {
+			Logger.WithError(err).Warn("unable to parse cdr date and time")
+			// we failed we set our own clock
+			StartBatchTime = time.Now().Unix()
+		}
+		Logger.WithField("date", t).Debug("time stamp for batch")
+		StartBatchTime = t.Unix()
+	} else {
+		StartBatchTime = time.Now().Unix()
+	}
+}
+
+func GetBatchStartTime() int64 {
+	return StartBatchTime
 }
