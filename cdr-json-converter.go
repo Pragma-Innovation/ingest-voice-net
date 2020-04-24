@@ -69,7 +69,6 @@ var (
 
 // End of flag declaration
 
-
 func main() {
 	flag.Var(&userCdrFiles, "file-cdr", "OPTIONAL BATCH MODE: List of CDR files")
 	flag.Var(&userKafkaBrokerList, "kafka-ip", "MANDATORY STREAM MODE: IP address of Kafka broker")
@@ -281,7 +280,6 @@ func postBatchToDruidCluster(myFileOut string, myDirInput string, myDruidCluster
 	return 0, nil
 }
 
-
 // Micro Batch related functions
 
 func microBatchMainFunc(myDirIn string, myDirOutput string, myFileOut string, myDruidFqdn string,
@@ -434,4 +432,3 @@ func batchStreamMainFunc(myDirInput string, myMicroBLoopTimeOut string,
 		"errors":            kafkaErrors,
 	}).Warn("exiting producer")
 }
-

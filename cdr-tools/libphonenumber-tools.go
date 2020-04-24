@@ -7,7 +7,7 @@ import (
 	"strconv"
 )
 
-var descNumTypeFromType = map[phonenumbers.PhoneNumberType]string {
+var descNumTypeFromType = map[phonenumbers.PhoneNumberType]string{
 	phonenumbers.FIXED_LINE:           "fixed line",
 	phonenumbers.MOBILE:               "mobile",
 	phonenumbers.FIXED_LINE_OR_MOBILE: "fixed line or mobile",
@@ -32,7 +32,7 @@ func LibPhoneNumberEnrichFields(myNumber string) (string, string, string, string
 	num, err = phonenumbers.Parse(myNumber, "FR")
 	if err != nil {
 		global.Logger.WithFields(logrus.Fields{
-			"error": err,
+			"error":  err,
 			"number": myNumber,
 		}).Info("unable to parse number")
 		return "", "", "", ""
@@ -41,7 +41,7 @@ func LibPhoneNumberEnrichFields(myNumber string) (string, string, string, string
 	geo, err = phonenumbers.GetGeocodingForNumber(num, "fr")
 	if err != nil {
 		global.Logger.WithFields(logrus.Fields{
-			"error": err,
+			"error":  err,
 			"number": myNumber,
 		}).Info("unable to GeoCode this number")
 		return "", "", "", ""

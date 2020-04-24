@@ -396,8 +396,6 @@ func (basicPack *CirpackBasicPackage) FulfilCdrTsJson(cdrTsModel *CirpackCdrJson
 	return nil
 }
 
-
-
 // RTP package
 
 func (rtpPack *CirpackRtpPackage) LoadCdrFieldsFromBlockPayload(payload string) error {
@@ -407,7 +405,6 @@ func (rtpPack *CirpackRtpPackage) LoadCdrFieldsFromBlockPayload(payload string) 
 	}
 	return nil
 }
-
 
 func (rtpPack *CirpackRtpPackage) FulfilCdrTsJsonWithCustomFields(cdrTsModel *CirpackCdrJsonTimeSeries) error {
 	// let's deal with ip and port field
@@ -431,8 +428,6 @@ func (rtpPack *CirpackRtpPackage) FulfilCdrTsJson(cdrTsModel *CirpackCdrJsonTime
 	}
 	return nil
 }
-
-
 
 // Undefined package
 
@@ -561,7 +556,6 @@ func ConvertCirpackCdrFromRawStringToJsonString(cdrData string) (string, error) 
 	return result, nil
 }
 
-
 func ConvertCirpackCdrsFromFileToJsonStringSlice(cdrFile string) ([]string, error) {
 	var returnedSlice []string
 	if cdrFileDesc, err := os.Open(cdrFile); err == nil {
@@ -608,7 +602,6 @@ func ConvertCirpackCdrsToJsonFromFileToFileDescriptor(cdrFile string, myOutPutFi
 	}
 	return writtenBytes, nil
 }
-
 
 // This function is reading the content of a CDR folder (produce by cirpack cdr tool)
 // Read CDR files and return a slice of strings (JSON CDR time series model)
