@@ -40,11 +40,11 @@ ExecStart=/usr/local/bin/ingest-voice-net \
 -kafka-topic voipcdr -batch-loop 120s -log warning\
 ```
 
-This sowftare is part of the PASS solution that integrates the full big data solution that includes:
+This software is part of the PASS solution that integrates the full big data solution (mainly relying on open source):
 * ingest of data,
-* message broker,
-* time series backend,
-* Data vizuatlization.
+* message broker (kafka),
+* time series backend (clickhouse),
+* data visualization (superset).
 
 https://pragma-security.com/index.php/telemetrie-reseau/
 
