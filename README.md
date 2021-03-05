@@ -12,6 +12,10 @@ Once deserialized CDR data can be stored in a time series database for use cases
 * Fraud detection,
 * ...
 
+# Basic diagram
+
+![basic-diagram](/docs/cdr-ingest-tool-topology.jpg)
+
 # Main features
 
 * Cirpack CDR deserializer: convert cirpack data structure into Go structure that can be marshall or unmarshall into JSON data
