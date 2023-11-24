@@ -96,22 +96,27 @@ func ReadCdrFolder(myDirInput string) ([]string, error) {
 	return cdrFiles, nil
 }
 
-// Function summary: delete cdr files list recieved as parameter
+func DeleteCdrFile(myFile string) {
+	err := os.Remove(myFile)
+	if err != nil {
+		Logger.WithFields(logrus.Fields{
+			"File":  myFile,
+			"error": err,
+		}).Fatal("Unable to delete cdr files after processing")
+		return
+	}
+	Logger.WithFields(logrus.Fields{
+		"deleted cdr": myFile,
+	}).Info("Cleaning of cdr folder")
+	return
+}
+
+// Function summary: delete cdr files list received as parameter
 // slice of strings with file names
 
 func PurgeCdrFiles(myFiles []string) {
 	for _, myFile := range myFiles {
-		err := os.Remove(myFile)
-		if err != nil {
-			Logger.WithFields(logrus.Fields{
-				"File":  myFile,
-				"error": err,
-			}).Fatal("Unable to delete cdr files after processing")
-			return
-		}
-		Logger.WithFields(logrus.Fields{
-			"deleted cdr": myFile,
-		}).Info("Cleaning of cdr folder")
+		DeleteCdrFile(myFile)
 	}
 }
 

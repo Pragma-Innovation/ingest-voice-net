@@ -67,7 +67,7 @@ var userCdrFiles fileList
 var userKafkaBrokerList kafkaBrokerList
 
 var (
-	userMode               = flag.String("mode", "", "MANDATORY: mode of execution, could be \"batch\" or \"micro-batch\"")
+	userMode               = flag.String("mode", "", "MANDATORY: mode of execution, could be \"batch\" or \"micro-batch\" or \"batch-stream\" or \"cherry-pit\"")
 	userDruidBatchFqdn     = flag.String("batch-fqdn", "", "MANDATORY BATCH MODE: gives the fqdn of druid cluster for batch ingest")
 	userDruidIntervals     = flag.String("batch-intervals", "", "MANDATORY BATCH MODE: gives intervals of time of batch ingestion")
 	userDruidSchemaTpl     = flag.String("batch-tpl", "", "MANDATORY BATCH MODE: Template file druid schema for batch ingest")
@@ -121,6 +121,10 @@ func main() {
 			batchStreamMainFunc(*userDirInput, *userMicroBLoopTimeOut, userKafkaBrokerList,
 				*userKafkaBrokerPort, *userKafkaDruidCdrTopic, *userKafkaCertFile, *userKafkaKeyFile,
 				*userKafkaCaFile, *userKafkaVerifySsl)
+		}
+	case "cherry-pit":
+		{
+			cherryPitMainFunc(*userDirInput, *userMicroBLoopTimeOut)
 		}
 	default:
 		flag.PrintDefaults()
@@ -416,32 +420,105 @@ func batchStreamMainFunc(myDirInput string, myMicroBLoopTimeOut string,
 
 	go func() {
 		for {
-
 			time.Sleep(myMicroBatchLoopTimeOutDur)
 			global.Logger.WithFields(logrus.Fields{
 				"time": global.GetBatchStartTime(),
 			}).Print("Starting a batch stream cycle")
-			myCdrs, err := cdrtools.ConvertCdrFolderToCdrs(myDirInput, true)
+			myCdrFiles, err := global.ReadCdrFolder(myDirInput)
 			if err != nil {
-				global.Logger.WithError(err).Fatal("issue reading/converting cdr folder")
+				global.Logger.WithError(err).Fatal("unable to read cdr folder")
 			}
-			// We  are done reading CDR's, we need to enrich, convert to JSON and send to Kafka
-			for _, myCdr := range myCdrs {
-				msg := &sarama.ProducerMessage{
-					Topic: myTopic,
-					Key:   sarama.StringEncoder("thereisnokey"),
-					Value: sarama.StringEncoder(myCdr)}
-				select {
-				case cdrProducer.Input() <- msg:
-					enqueued++
-				case err := <-cdrProducer.Errors():
-					kafkaErrors++
-					global.Logger.WithError(err).Warn("Failed to produce message")
+			if len(myCdrFiles) == 0 {
+				global.Logger.Info("CDR folder is empty waiting for next batch cycle")
+				return
+			}
+			for _, cdrFile := range myCdrFiles {
+				cdrsSlice, err := cdrtools.ConvertCirpackCdrsFromFileToJsonStringSlice(cdrFile)
+				if err != nil {
+					global.Logger.WithError(err).Warn("unable to convert cdr file into slice of JSON CDR")
 				}
+				for _, myCdr := range cdrsSlice {
+					msg := &sarama.ProducerMessage{
+						Topic: myTopic,
+						Key:   sarama.StringEncoder("thereisnokey"),
+						Value: sarama.StringEncoder(myCdr)}
+					select {
+					case cdrProducer.Input() <- msg:
+						enqueued++
+					case err := <-cdrProducer.Errors():
+						kafkaErrors++
+						global.Logger.WithError(err).Warn("Failed to produce message")
+					}
+				}
+				global.DeleteCdrFile(cdrFile)
 			}
 		}
 	}()
 	global.Logger.Info("Producer lanched ... waiting for signals")
+	<-doneCh
+	global.Logger.Info("Interrupt received exiting Producer loop ...")
+
+	global.Logger.WithFields(logrus.Fields{
+		"messages enqueued": enqueued,
+		"errors":            kafkaErrors,
+	}).Warn("exiting producer")
+}
+
+// Functions related to micro batch cdr files pushed to Kafka
+
+func cherryPitMainFunc(myDirInput string, myMicroBLoopTimeOut string) {
+	// let's check if we have all we need
+	if len(myDirInput) == 0 || len(myMicroBLoopTimeOut) == 0 {
+		flag.PrintDefaults()
+		global.Logger.Fatal("missing required argument for cherry pit mode")
+	}
+	myMicroBatchLoopTimeOutDur, err := time.ParseDuration(myMicroBLoopTimeOut)
+	if err != nil {
+		global.Logger.WithError(err).Fatal("Wrong Loop time out")
+	}
+
+	cdrProducerSignals := make(chan os.Signal, 1)
+	signal.Notify(cdrProducerSignals, os.Interrupt)
+
+	var enqueued, kafkaErrors int
+	doneCh := make(chan bool, 1)
+	// launch go routing to capture signal interrupt
+	go func() {
+		for mySig := range cdrProducerSignals {
+			global.Logger.WithField("signal", mySig).Warn("signal received")
+			doneCh <- true
+		}
+	}()
+
+	go func() {
+		for {
+			time.Sleep(myMicroBatchLoopTimeOutDur)
+			global.Logger.WithFields(logrus.Fields{
+				"time": global.GetBatchStartTime(),
+			}).Print("Starting a batch stream cycle")
+			myCdrFiles, err := global.ReadCdrFolder(myDirInput)
+			if err != nil {
+				global.Logger.WithError(err).Fatal("unable to read cdr folder")
+			}
+			if len(myCdrFiles) == 0 {
+				global.Logger.Info("CDR folder is empty waiting for next batch cycle")
+				return
+			}
+			for _, cdrFile := range myCdrFiles {
+				cdrsSlice, err := cdrtools.ConvertCirpackCdrsFromFileToJsonStringSlice(cdrFile)
+				if err != nil {
+					global.Logger.WithError(err).Warn("unable to convert cdr file into slice of JSON CDR")
+				}
+				for _, myCdr := range cdrsSlice {
+					global.Logger.WithFields(logrus.Fields{
+						"cdr": myCdr,
+					}).Warn("uncompressed data")
+				}
+				global.DeleteCdrFile(cdrFile)
+			}
+		}
+	}()
+	global.Logger.Info("Producer launched ... waiting for signals")
 	<-doneCh
 	global.Logger.Info("Interrupt received exiting Producer loop ...")
 

@@ -191,6 +191,10 @@ func splitCdrHeader(header string) []string {
 
 func (cdrBlocks *CirpackCdrBlocks) ReadHeaderBlock(cdrString string) (string, error) {
 	headerLen := strings.IndexRune(cdrString, ' ')
+	if headerLen == -1 {
+		global.Logger.Warn("unable find CDR header separator")
+		return "", nil
+	}
 	header := cdrString[0:headerLen]
 	headerSlice := splitCdrHeader(header)
 	if len(headerSlice) <= 1 {
@@ -470,6 +474,10 @@ func (cdr *CirpackCdr) loadCdrIngestTimeFieldsFromBlocks(cdrBlocks *CirpackCdrBl
 
 func (cdr *CirpackCdr) loadCdrHeaderFieldsFromBlocks(cdrBlocks *CirpackCdrBlocks) error {
 	headerSlice := splitCdrHeader(cdrBlocks.Header)
+	if len(headerSlice) == 0 {
+		err := fmt.Errorf("cdr header is wrong")
+		return err
+	}
 	cdr.Header.AppFlag = headerSlice[0]
 	cdr.Header.Length = cdrBlocks.Length
 	return nil
@@ -550,13 +558,20 @@ func (cdr *CirpackCdr) loadCdrFieldsFromCdrPayload(payload string) error {
 func ConvertCirpackCdrFromRawStringToJsonString(cdrData string) (string, error) {
 	var result string
 	cirpackCdr := NewCirpackCdr()
-	err := cirpackCdr.loadCdrFieldsFromCdrPayload(cdrData)
-	if err != nil {
-		global.Logger.Warn("unable load cdr fields from raw cdr data")
-		return "", err
+	fmt.Println(len(cdrData))
+	if len(cdrData) > 0 {
+		err := cirpackCdr.loadCdrFieldsFromCdrPayload(cdrData)
+		if err != nil {
+			global.Logger.Warn("unable load cdr fields from raw cdr data")
+			return "", err
+		}
+	} else {
+		global.Logger.Warn("cannot deal with cdr length")
+		return "", nil
 	}
+
 	cdrTs := NewCirpackCdrJsonTimeSeries()
-	err = cdrTs.LoadData(cirpackCdr)
+	err := cdrTs.LoadData(cirpackCdr)
 	if err != nil {
 		global.Logger.WithError(err).Warn("unable to load time series cdr model")
 	} else {
@@ -634,13 +649,7 @@ func ConvertCdrFolderToCdrs(myCdrDirInput string, purgeCdrFiles bool) ([]string,
 		global.Logger.Info("CDR folder is empty waiting for next batch cycle")
 		return nil, nil
 	}
-	for _, cdrFile := range myCdrFiles {
-		cdrsSlice, err := ConvertCirpackCdrsFromFileToJsonStringSlice(cdrFile)
-		if err != nil {
-			global.Logger.WithError(err).Warn("unable to convert cdr file into slice of JSON CDR")
-		}
-		returnCdrs = append(returnCdrs, cdrsSlice...)
-	}
+
 	global.Logger.WithFields(logrus.Fields{
 		"cdr files": len(myCdrFiles),
 		"cdr's":     len(returnCdrs),
